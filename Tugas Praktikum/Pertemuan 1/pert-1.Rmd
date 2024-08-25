@@ -1,0 +1,348 @@
+---
+title: "Tugas Pertemuan 1 - Smoothing"
+author: "Indra Mahib Z. R"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Library Used
+
+```{r,message=F, warning=F}
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+```
+
+## Data Preparation
+
+Data yang digunakan adalah data yang berasal dari DEPHUB, berupa data harian penumpang berangkat di Bandara Sultan Aji (BPN) di Kalimantan Timur. Periode data yang digunakan secara keseluruhan adalah dari 1 Januari 2023 hingga 31 Juni 2024 dengan total 571 periode. Data ini kemudian dibagi ke 5 mahasiswa yang tergabung dalam kelompok. Sehingga data yang digunakan pada tugas ini berjumlah 115 hari (periode).
+
+### Data Loading
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\data\\dt_pt3.csv")
+dt <- dt %>% select(Tanggal, Penumpang.Berangkat)
+## lower case names
+names(dt) <- tolower(names(dt))
+head(dt)
+```
+
+```{r}
+str(dt)
+```
+
+Dapat dilihat bahwa variabel tanggal merupakan tipe data karakter, sehingga perlu diubah menjadi tipe data date.
+
+```{r}
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+str(dt)
+```
+
+```{r}
+### mengubah data menjadi format time series
+dt.ts <- ts(dt$penumpang.berangkat)
+```
+
+## Eksplorasi Data
+
+### Statistik Deskriptif
+
+```{r}
+summary(dt.ts)
+```
+
+nilai median dan mean tidak berbeda jauh.
+
+### Visualisasi Data
+
+```{r}
+plot(dt.ts, main = "Penumpang Berangkat Bandara Sultan Aji", ylab = "Jumlah Penumpang", xlab = "Hari")
+points(dt.ts, col = "grey")
+```
+
+Dari plot deret waktu yang terbentuk seperti terdapat pola seasonal yang terlihat cukup jelas dan pola tren yang kecil.
+
+## Spliting Train & Test Data
+
+```{r}
+train_dt <- dt[1:90,]
+test_dt <- dt[91:115,]
+train.ts <- ts(train_dt$penumpang.berangkat)
+test.ts <- ts(test_dt$penumpang.berangkat)
+```
+
+Mari cek apakah data sudah sesuai atau belum dengan membuat plot.
+
+```{r}
+ggplot() + 
+  geom_line(data = dt, aes(x = tanggal, y = penumpang.berangkat, col = "Data Latih")) +
+  geom_line(data = test_dt, aes(x = tanggal, y = penumpang.berangkat, col = "Data Uji")) +
+  labs(x = "Periode Waktu", y = "Penumpang Berangkat", color = "Legend") +
+  scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+Data yang kita bagi sudah sesuai. 
+
+## Smoothing
+### Single Moving Average
+```{r}
+sma3 <- SMA(train.ts, n = 3)
+sma5 <- SMA(train.ts, n = 5)
+```
+
+```{r}
+## perbandingan plot awal dan SMA
+ggplot()+
+  geom_line(data = train_dt, aes(x = tanggal, y = penumpang.berangkat, col = "train_dt"))+
+  geom_line(data = dt[1:90,], aes(x = tanggal, y = sma3, col = "SMA n=3"))+
+  geom_line(data = dt[1:90,], aes(x = tanggal, y = sma5, col = "SMA n=5"))+
+  labs(x = "Periode Waktu", y = "Penumpang Berangkat", color = "Legend")+
+  scale_colour_manual(name="Keterangan:", breaks = c("train_dt", "SMA n=3","SMA n=5"),
+                      values = c("blue", "red","green"))+
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+#### Forecasting SMA
+```{r}
+## forecast 1 periode ke depan
+sma3_f1 <- c(NA,sma3)
+### forecast 25 period ke depan
+predict <- c(sma3_f1,rep(sma3_f1[length(sma3_f1)],24))
+aktual <- c(train.ts,rep(NA,25))
+smoothig <- c(sma3,rep(NA,25))
+
+sma3_forecast <- cbind(aktual,smoothig,predict)
+```
+
+
+```{r}
+## plot hasil
+ts.plot(dt.ts)
+points(dt.ts)
+lines(sma3_forecast[,2],col="green",lwd=2)
+lines(sma3_forecast[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+
+Hasil prediksi dari SMA akan menghasilkan nilai konstan di akhir prediksi, maka dari itu lebih cocok digunakan ketika data cenderung stasioner.
+
+#### Evaluasi Model
+##### Evaluasi Training
+```{r}
+### Training error
+
+train_error_sma3 <- train.ts - predict[length(train.ts)]
+RMSE_train_sma3 <- sqrt(mean(train_error_sma3^2, na.rm = T))
+MAPE_train_sma3 <- mean(abs(train_error_sma3/train.ts)*100, na.rm = T)
+
+RMSE_train_sma3
+MAPE_train_sma3
+
+```
+Nilai evaluasi pada data latih menggunakan RMSE adalah 664.3887 dan MAPE adalah 8.4%. 
+
+##### Evaluasi Testing
+```{r}
+### Testing error
+
+test_error_sma3 <- test.ts - predict[length(train.ts):length(train.ts)+length(test.ts)]
+RMSE_test_sma3 <- sqrt(mean(test_error_sma3^2, na.rm = T))
+MAPE_test_sma3 <- mean(abs(test_error_sma3/test.ts)*100, na.rm = T)
+
+RMSE_test_sma3
+MAPE_test_sma3
+
+```
+Nilai evaluasi pada data uji menggunakan RMSE adalah 746.4012 dan MAPE adalah 9.1 %. Hal ini lebih tinggi dari hasil traininig namun tidak terlalu berbeda jauh.
+
+### Double Moving Average
+#### Forecast DMA
+```{r}
+dma3 <- SMA(sma3, n = 3)
+At <- 2*sma3 - dma3
+Bt <- 2/(3-1) * (sma3 - dma3)
+dma.res <- At + Bt
+```
+
+```{r}
+t = 1:25
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+dma_forecast <- cbind(aktual = c(train.ts,rep(NA,25)), pemulusan1 = c(sma3,rep(NA,25)),pemulusan2 = c(dma.res, rep(NA,25)),At = c(At, rep(NA,25)), Bt = c(Bt,rep(NA,25)),ramalan = c(NA,dma.res, f[-1]))
+dma_forecast
+```
+
+```{r}
+ts.plot(dt.ts)
+points(dt.ts)
+lines(dma_forecast[,3],col="green",lwd=2)
+lines(dma_forecast[,6],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.8)
+```
+
+Terlihat hasil peramalan dari DMA pada akhir periode menunjukan kenaikan yang sangat tinggi, hal ini kemungkinan besar terjadi karena DMA menangkap pola tren yang tidak tersedia di dalam data sehingga DMA kurang cocok digunakan karena data yang digunakan adalah data yang cukup stasioner
+
+#### Evaluasi Model
+
+##### Evaluasi Training
+
+```{r}
+### Training error
+dma_train_error <- train.ts - dma_forecast[1:length(train.ts),6]
+
+RMSE_train_dma <- sqrt(mean(dma_train_error^2, na.rm = T))
+MAPE_train_dma <- mean(abs(dma_train_error/train.ts)*100, na.rm = T)
+
+RMSE_train_dma
+MAPE_train_dma
+
+```
+dapat dilihat bahwa nilai error lebih tinggi pada DMA dibanding SMA.
+
+##### Evaluasi Testing
+
+```{r}
+### Testing error
+dma_test_error <- test.ts - dma_forecast[length(train.ts)+1:length(test.ts),6]
+
+RMSE_test_dma <- sqrt(mean(dma_test_error^2, na.rm = T))
+MAPE_test_dma <- mean(abs(dma_test_error/test.ts)*100, na.rm = T)
+
+RMSE_test_dma
+MAPE_test_dma
+
+```
+Error yang tinggi juga terlihat karena DMA menangkap pola tren yang tidak tersedia di dalam data.
+
+### Single Expotential Smoothing
+#### Forecast SES
+```{r}
+ses1 <- ses(train.ts, beta = FALSE, gamma = FALSE,alpha = NULL)
+
+autoplot(ses1) +
+  autolayer(fitted(ses1), series="Fitted") +
+  ylab("Penumpang Berangkat") + xlab("Periode")
+```
+
+#### Evaluasi Model
+##### Evaluasi training
+```{r}
+### Training error
+ses_train_error <- train.ts - ses1$fitted
+
+RMSE_train_ses <- sqrt(mean(ses_train_error^2, na.rm = T))
+MAPE_train_ses <- mean(abs(ses_train_error/train.ts)*100, na.rm = T)
+
+RMSE_train_ses
+MAPE_train_ses
+
+```
+Nilai error menggunakan SES dengan nilai alpha yang optimal menunjukan model yang memiliki error yang lebih kecil dalam trainining.
+
+##### Evaluasi Testing
+```{r}
+### Testing error
+ses_prediction <- forecast(ses1, h = 10)
+ses_test_error <- test.ts - ses_prediction$mean[1]
+
+RMSE_test_ses <- sqrt(mean(ses_test_error^2, na.rm = T))
+MAPE_test_ses <- mean(abs(ses_test_error/test.ts)*100, na.rm = T)
+
+RMSE_test_ses
+MAPE_test_ses
+```
+Hasil pada evaluasi testing lebih tinggi dari training.
+
+### Double Exponential Smoothing
+#### Forecast DES
+```{r}
+des <- HoltWinters(train.ts, beta = NULL, gamma = FALSE,alpha = NULL)
+plot(des)
+```
+
+```{r}
+des_predict <- forecast(des, h = 25)
+```
+
+#### Evaluasi Model
+##### Evaluasi Training
+```{r}
+### Training error
+des_train_error <- train.ts - des$fitted
+
+RMSE_train_des <- sqrt(mean(des_train_error^2, na.rm = T))
+MAPE_train_des <- mean(abs(des_train_error/train.ts)*100, na.rm = T)
+
+RMSE_train_des
+MAPE_train_des
+
+```
+Sama seperti sebelumnya bahwa model DES menangkap pola tren yang tidak tersedia di data sehingga errornya sangat tinggi.
+
+##### Evaluasi Testing
+```{r}
+### Testing error
+des_test_error <- test.ts - des_predict$mean[1:25]
+
+RMSE_test_des <- sqrt(mean(des_test_error^2, na.rm = T))
+MAPE_test_des <- mean(abs(des_test_error/test.ts)*100, na.rm = T)
+
+RMSE_test_des
+MAPE_test_des
+```
+Nilai error pada testing juga tinggi.
+
+### Holt Winters Smoothing
+#### HW Forecasting
+```{r}
+train.winter <- ts(train_dt$penumpang.berangkat, frequency = 7)
+hw <- HoltWinters(train.winter, beta = NULL, gamma = NULL,alpha = NULL,seasonal = "additive")
+plot(hw)
+```
+
+```{r}
+hw_predict <- forecast(hw, h = 25)
+```
+
+#### Evaluasi Model
+##### Evaluasi Training
+```{r}
+### Training error
+hw_train_error <- train.winter - hw$fitted
+
+RMSE_train_hw <- sqrt(mean(hw_train_error^2, na.rm = T))
+MAPE_train_hw <- mean(abs(hw_train_error/train.winter)*100, na.rm = T)
+
+RMSE_train_hw
+MAPE_train_hw
+``` 
+Nilai error menggunakan HW karena data yang cenderung stasioner juga.
+
+##### Evaluasi Testing
+```{r}
+### Testing error
+hw_test_error <- test.ts - hw_predict$mean[1:25]
+
+RMSE_test_hw <- sqrt(mean(hw_test_error^2, na.rm = T))
+MAPE_test_hw <- mean(abs(hw_test_error/test.ts)*100, na.rm = T)
+
+RMSE_test_hw
+MAPE_test_hw
+```
+Walaupun nilai error pada training cukup tinggi, namun nilai error model HW yang mampu menghasilkan prediksi yang lebih baik diantara semua model yang ada. Hal ini kemugnkinan besar karena penentuan nilai alpha, beta, dan gamma secara optimum. 
+
+```{r}
+hw
+```
+nilai parameter gamma adalah yang paling besar, sehingga kemungkinan besar pola musiman yang lebih dapat menjelaskan data yang ada.
+

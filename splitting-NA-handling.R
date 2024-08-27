@@ -1,7 +1,7 @@
 test <- read.csv("D:\\IPB\\5\\MPDW\\data\\dt_BPN.csv")
 test <- test %>% select(Tanggal,Penumpang.Berangkat)
 test$Tanggal <- as.Date(test$Tanggal, format = "%Y-%m-%d")
-
+dim(test)
 test.ts <- ts(test$Penumpang.Berangkat,start=c(2023,1),end=c(2024,7),frequency=1)
 
 plot(test.ts)

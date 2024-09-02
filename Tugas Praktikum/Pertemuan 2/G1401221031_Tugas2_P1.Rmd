@@ -1,0 +1,185 @@
+---
+title: "Tugas Pertemuan 2 - Penanganan Autokorelasi"
+author: "Indra Mahib Z.R"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Library Used
+
+```{r,warning=F,message=F}
+library(dplyr)
+library(TTR)
+library(forecast)
+library(readxl)
+library(lmtest) #digunakan untuk uji formal pendeteksian autokorelasi
+library(orcutt) #untuk membuat model regresi Cochrane-Orcutt
+library(HoRM) #untuk membuat model regresi Hildreth-Lu
+```
+
+## Load Data
+
+```{r}
+dt <- read_excel("D:\\IPB\\5\\MPDW\\Tugas Praktikum\\Pertemuan 2\\data_GDP.xls",sheet="paraguay")
+head(dt)
+```
+untuk mempermudah perhitungan dan interpretasi, GDP akan dibagi 10^9 agar angka tidak terlalu besar.
+
+```{r}
+dt$GDP <- dt$GDP/10^9
+```
+
+
+## EDA
+
+
+```{r}
+gdp.ts <- ts(dt$GDP, start=c(1960,1), end=c(2023,1), frequency=1)
+plot(gdp.ts,
+     lwd=3,
+     col="blue",
+     main="Time Series GDP Paraguay",
+     sub="1960-2023",
+     xlab="Year",
+     ylab="GDP (Miliar)")
+```
+
+Terdapat kenaikan yang tinggi pada tahun 2000 awal. Untuk keperluan analisis dan tugas ini, kita akan mengambil sampai tahun 2000 saja.
+
+### Subsetting 1960-2000
+
+```{r}
+gdp.new <- dt %>% filter(Year <= 2000)
+```
+
+## Pemodelan Regresi Linear
+
+```{r}
+model.reg <- lm(GDP~Year,data=gdp.new)
+summary(model.reg)
+```
+
+Didapatkan hasil pemodelan dari regresi linear adalah
+
+$$
+\begin{equation}
+\hat{y} = -502.663 + 0.256 Year
+\end{equation}
+$$
+
+### Uji asumsi kenormalan sisaan
+
+```{r}
+plot(model.reg, which=2)
+```
+
+
+```{r}
+resid.reg <- residuals(model.reg)
+shapiro.test(resid.reg)
+```
+Asumsi normalitas sisaan terpenuhi
+
+### Uji asumsi homoskedastisitas
+```{r}
+plot(model.reg, which=1)
+```
+Seperti ada pola dalam Residual Vs Fitted.
+```{r}
+bptest(model.reg)
+```
+
+Walaupun secara eksplorasi terlihat ragam tidak homogen karena berpola, namun uji formal menunjukan homosskedasitas ragam sisaan.
+
+### Uji asumsi autokorelasi
+
+```{r}
+acf(resid.reg)
+pacf(resid.reg)
+```
+Plot ACF dan PACF menunjukan bahwa terdapat pengaruh lag 1 pada sisaan. Hal ini mengindikasikan adanya autokorelasi.
+
+```{r}
+dwtest(model.reg)
+```
+Uji Durbin-Watson mendukung temuan kita sebelumnya. Terdapat autokorelasi pada model regresi linear. Autokorelasi yang terjadi cenderung autokorelasi positif. Karena itu kita lakukan penanganan autokorelasi.
+
+## Penanganan Autokorelasi
+### Cochrane-Orcutt
+```{r}
+CO <- cochrane.orcutt(model.reg)
+summary(CO)
+```
+Didapat persamaan regersi Cochrane-Orcutt adalah
+$$
+\begin{equation}
+\hat{y_{CO}} = -577.854 + 0.294 Year
+\end{equation}
+$$
+#### Uji autokorelasi
+```{r}
+dwtest(CO)
+```
+Uji Durbin-Watson menunjukan bahwa autokorelasi belum juga teratasi
+
+### Hildreth-Lu
+Mencari nilai rho yang meminimumkan SSE
+```{r}
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model.reg))}))
+round(tab, 4)
+```
+nilai SSE terkecil didapat pada antara 0.8-0.9
+
+```{r}
+#Rho optimal di sekitar 0.8-0.9
+rOpt <- seq(0.75,0.95, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model.reg))}))
+head(tabOpt[order(tabOpt$SSE),])
+
+#Grafik SSE optimum
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+
+## Optimum
+tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"]
+```
+Nilai rho optimum yang di dapat adalah 0.844
+
+```{r}
+HidL <- hildreth.lu.func(0.844,model = model.reg)
+summary(HidL)
+
+#transform balik
+cat("y = ", coef(HidL)[1]/(1-0.844), "+", coef(HidL)[2],"x", sep = "")
+```
+Persamaan yang terbentuk dari pemodelan hidret-lu adalah
+
+$$
+\begin{equation}
+\hat{y_{HL}} = -577.741 + 0.293 Year
+\end{equation}
+$$
+
+#### Uji autokorelasi
+```{r}
+dwtest(HidL)
+```
+Autokorelasi juga masih ada.
+
+## Kesimpulan
+Dari hasil analisis, kita menemukan bahwa autokorelasi masih ada pada model regresi linear. Penanganan autokorelasi dengan metode Cochrane-Orcutt dan Hildreth-Lu juga belum mampu menghilangkan autokorelasi. Diperlukan metode lain untuk mengatasi autokorelasi pada model regresi linear ini.

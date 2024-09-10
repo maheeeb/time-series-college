@@ -1,0 +1,287 @@
+---
+title: "Pertemuan 4 - Latihan"
+author: "Indra Mahib Zuhair Riyanto"
+output: 
+  html_document:
+    theme: flatly
+    highlight: haddock
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+## Libs
+```{r}
+library(TSA)
+library(dplyr)
+library(tseries)
+```
+
+## nomor 1 
+### manual MA(2)
+
+```{r}
+set.seed(6969)
+wn <- rnorm(300)
+ma2 <- wn[1:2]
+for(i in 3:300){
+   ma2[i] <- wn[i] - (0.4 * wn[i - 1]) - (0.6  * wn[i - 2])
+}
+ma2
+```
+
+### arima.sim MA(2)
+
+```{r}
+ma2.matic <- arima.sim(n = 300,list(order=c(0,0,2),ma=c(0.4,0.6)))
+ma2.matic
+```
+### Plot TS
+```{r}
+plot.ts(ma2)
+```
+
+### ACF
+```{r}
+acf(ma2)
+```
+
+cutoff after lag 2
+
+### PACF
+```{r}
+pacf(ma2)
+```
+tail offs
+
+### EACF
+```{r}
+TSA::eacf(ma2)
+```
+segitiga dari nol pertama terlihat pada MA(2)
+
+### Identifikasi Stasioner
+```{r}
+plot.ts(ma2)
+```
+
+dari eksplorasi plot terlihat sepertinya stasioner. Selanjutnya kita uji dengan uji ADF.
+
+- H0: Data tidak stasioner dalam rataan 
+- H1: Data stasioner dalam rataan
+
+```{r}
+adf.test(ma2)
+```
+Menggunakan uji kita mendapatkan kesimpulan tolak H0 pada taraf 5% yang berarti data stasioner. 
+
+### Scatterplot Yt dan Yt-1
+```{r}
+plot(ma2[2:300],ma2[1:299],xlab="Yt",ylab ="Yt-1")
+```
+### Scatterplot Yt dan Yt-2
+```{r}
+plot(ma2[3:300],ma2[1:298],xlab="Yt",ylab ="Yt-2")
+```
+### Scatterplot Yt dan Yt-3
+```{r}
+plot(ma2[4:300],ma2[1:297],xlab="Yt",ylab ="Yt-3")
+```
+### Autokorelasi Data Vs Teoritis
+```{r}
+cor(ma2[2:300],ma2[1:299])
+cor(ma2[3:300],ma2[1:298])
+cor(ma2[4:300],ma2[1:297])
+```
+```{r}
+theta1 <- 0.4
+theta2 <- 0.6
+
+ro1ma2 <- (-theta1 + (theta1 * theta2)) / (1+theta1^2+theta2^2)
+
+ro2ma2 <- -theta2 / (1+theta1^2+theta2^2)
+
+cat("Ro1 Data : ", cor(ma2[2:300],ma2[1:299]),"\n",
+    "Ro1 Perhitungan: ", ro1ma2,"\n",
+    "Ro2 Data : ", cor(ma2[3:300],ma2[1:298]),"\n",
+    "Ro2 Perhitungan: ", ro2ma2, "\n",
+    "Ro3 Data : ", cor(ma2[4:300],ma2[1:297]),"\n",
+    "RO3 Perhitungan: ", 0)
+```
+Terlihat dari korelasi data, nilai korelasi cukup mendekati nilai korelasi teoritis.
+
+## Nomor 2
+### Manual AR(2)
+```{r}
+n<-length(wn)
+ar2 <- c()
+ar2[1] <- wn[1]
+ar2[2] <- wn[2]
+for (i in 3:n) {ar2[i]<-wn[i]+(0.5*ar2[i-1])+(0.2*ar2[i-2])}
+ar2
+```
+### arima.sim AR(2)
+```{r}
+ar2.matic <- arima.sim(n = 300,list(order=c(2,0,0),ar=c(0.5,0.2)))
+ar2.matic
+```
+
+### Plot TS
+```{r}
+plot.ts(ar2)
+```
+### ACF
+```{r}
+acf(ar2)
+```
+tails off
+
+### PACF
+```{r}
+pacf(ar2)
+```
+cut off after lag 2
+
+### EACF
+
+```{r}
+TSA::eacf(ar2)
+```
+segitiga dari nol terlihat pada AR(2)
+
+### Identifikasi Stasioner
+```{r}
+plot.ts(ar2)
+```
+Secara eksploratif dengan plot, data terlihat stasioner. Selanjutnya kita uji dengan uji ADF.
+
+- H0: Data tidak stasioner dalam rataan
+- H1: Data stasioner dalam rataan
+
+```{r}
+adf.test(ar2)
+```
+Tolak H0 yang artinya, data stasioner.
+
+### Scatterplot Yt dan Yt-1
+```{r}
+plot(ar2[2:300],ar2[1:299],xlab="Yt",ylab ="Yt-1")
+```
+### Scatterplot Yt dan Yt-2
+```{r}
+plot(ar2[3:300],ar2[1:298],xlab="Yt",ylab ="Yt-2")
+```
+### Scatterplot Yt dan Yt-3
+```{r}
+plot(ar2[4:300],ar2[1:297],xlab="Yt",ylab ="Yt-3")
+```
+### Autokorelasi Data Vs Teoritis
+```{r}
+phi1 <- 0.5
+phi2 <- 0.2
+ro1ar2 <- phi1 / (1-phi2)
+ro2ar2 <- (phi2*(1-phi2)+phi1^2) / (1-phi2)
+ro3ar2 <- phi1 * ro1ar2 + phi2 * ro2ar2
+cat(
+    "Ro1 Data : ", cor(ar2[2:300],ar2[1:299]),"\n",
+    "Ro1 Perhitungan: ", ro1ar2 ,"\n",
+    "Ro2 Data : ", cor(ar2[3:300],ar2[1:298]),"\n",
+    "Ro2 Perhitungan: ",ro2ar2 ,"\n",
+    "Ro3 Data : ", cor(ar2[4:300],ar2[1:297]),"\n",
+    "RO3 Perhitungan: ", ro3ar2)
+```
+Terlihat dari korelasi data, nilai korelasi cukup mendekati nilai korelasi teoritis.
+
+## Nomor 3
+### Manual ARMA(2,2)
+```{r}
+n<-length(wn)
+arma22 <- c()
+arma22[1] <- wn[1]
+arma22[2] <- arma22[1] * 0.5 + wn[1]*0.4 + wn[2]
+
+for (i in 3:n) {arma22[i]<-wn[i]+(0.5*arma22[i-1])+(0.2*arma22[i-2])+(0.4*wn[i-1])+(0.6*wn[i-2])}
+
+arma22
+```
+
+```{r}
+arma.sim <- function(n, macoef, arcoef){
+  manum <- length(macoef)
+  arnum <- length(arcoef)
+  stopifnot(manum < n & arnum < n)
+  
+  wn <- rnorm(n, sd = 0.5)
+  init <- max(manum, arnum)
+
+  arma <- wn[1:init]
+  for(i in {init+1}:n){
+   mastart <- i - manum
+   maend <- i-1
+   arstart <- i - arnum
+   arend <- i-1
+   arma[i] <- sum(arcoef * arma[arstart:arend]) + sum(macoef * wn[mastart:maend])  + wn[i]
+   }
+  return(arma)
+}
+
+arma22.func <- arma.sim(300, c(0.4,0.6), c(0.5,0.2))
+```
+
+### arima.sim ARMA(2,2)
+```{r}
+arma22.matic <- arima.sim(n = 300,list(order=c(2,0,2),ar=c(0.5,0.2),ma=c(0.4,0.6)))
+arma22.matic
+```
+### Plot TS
+```{r}
+plot.ts(arma22)
+```
+### ACF
+```{r}
+acf(arma22)
+```
+### PACF
+```{r}
+pacf(arma22)
+```
+### EACF
+```{r}
+TSA::eacf(arma22.func)
+```
+Terlihat ujung segitiga lingkaran pada ARMA(2,2)
+
+### Identifikasi Stasioner
+```{r}
+plot.ts(arma22)
+```
+Secara eksploratif dengan plot, data terlihat stasioner. Selanjutnya kita uji dengan uji ADF.
+
+- H0: Data tidak stasioner dalam rataan
+- H1: Data stasioner dalam rataan
+
+```{r}
+adf.test(arma22)
+```
+Keputusannya adalah tolak H0, sehingga data stasioner.
+
+### Scatterplot Yt dan Yt-1
+```{r}
+plot(arma22[2:300],arma22[1:299],xlab="Yt",ylab ="Yt-1")
+```
+```{r}
+plot(arma22[3:300],arma22[1:298],xlab="Yt",ylab ="Yt-2")
+```
+
+```{r}
+plot(arma22[4:300],arma22[1:297],xlab="Yt",ylab ="Yt-3")
+```
+### Autokorelasi Data
+```{r}
+cor(arma22[2:300],arma22[1:299])
+cor(arma22[3:300],arma22[1:298])
+cor(arma22[4:300],arma22[1:297])
+```
+
+

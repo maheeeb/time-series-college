@@ -1,0 +1,172 @@
+---
+title: "Tugas Pertemuan 5"
+author: "Indra Mahib Z. R"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+## Library
+```{r, warning=FALSE, message=FALSE}
+library(TSA)
+library(dplyr)
+library(ggplot2)
+library(tseries) ## adf.test
+library(MASS) ## boxcox
+library(forecast)
+```
+
+## Load Data
+Data yang digunakan merupakan data yang berasal dari SIASATI (Sistem Informasi Angkutan dan Saruna Transportasi Indonesia) yang berisi data jumlah penumpang pesawat berangkat dari bandara BPN.
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\data\\others\\dt_pt3.csv")
+head(dt)
+```
+### Preprocessing Data
+```{r}
+names(dt) <- c("tanggal","penumpang")
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+summary(dt)
+```
+
+## Data Keseluruhan
+### Visualisasi Data
+```{r}
+ggplot(dt, aes(x = tanggal, y = penumpang)) +
+  geom_line() +
+  labs(title = "Jumlah Penumpang Pesawat Berangkat dari Bandara BPN",
+       x = "Tanggal",
+       y = "Jumlah Penumpang") +
+  theme_minimal()+
+  geom_line(aes(y = mean(penumpang)),col="darkred")
+```
+Terlihat pola deret waktu cenderung stasioner dalam rataan karenba bergerak di sekitar 6500an dan memiliki ragam yang cenderung stasioner pula. Namun, terdapat beberapa waktu yang memilik ragam lebih besar atau lebih kecil. Selanjutnya kita akan melihat lebih dalam terkait penemuan ini.
+
+### ACF, PACF, EACF
+```{r}
+acf(dt$penumpang, main = "ACF",lag.max=30)
+pacf(dt$penumpang, main = "PACF",lag.max=30)
+eacf(dt$penumpang)
+```
+Terlihat dari plot ACF dan PACF bahwa deret waktu memiliki pola yang cenderung seasonal. Kemungkinan besar pola musim yang ada adalah pola mingguan.
+
+Dari hasil EACF kemungkinan model yang cocok adalah ARMA(2,1), AR(5), atau ARMA(4,2)
+
+### Cek Stasioner dalam Rataan
+Untuk mengecek kestasioneran dari rataan kita dapat melihat secara eksploratif dan melakukan Uji Dickey-Fuller.
+
+- $H_0$ : Deret waktu tidak stasioner dalam rataan
+- $H_1$ : Deret waktu stasioner dalam rataan
+
+
+```{r}
+adf.test(dt$penumpang)
+```
+Hasil pengujian mendukung kecenderungan dari eksplorasi data sebelumnya yaitu data stasioner dalam rataan.
+
+### Cek Stasioner dalam Ragam
+Untuk mengecek kestasioneran dari ragam kita dapat menggunakan box-cox.
+
+```{r}
+index1 <- c(1:dim(dt)[1])
+bc1 <- boxcox(penumpang~index1, data = dt)
+lambda1 <- bc1$x[which.max(bc1$y)]
+lambda1
+
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% min()
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% max()
+```
+Terlihat selang kepercayaan boxcox yaitu **-1.76** hingga **1.84** mengandung nilai 1. Yang berarti ragam dari data stasioner
+
+## Split 1
+### Split Data
+```{r}
+dt1 <- dt[1:58,] ### data dari pengamtan pertama ke 58
+```
+
+### Visualisasi Data
+```{r}
+ggplot(dt1, aes(x = tanggal, y = penumpang)) +
+  geom_line() +
+  labs(title = "Jumlah Penumpang Pesawat Berangkat dari Bandara BPN",
+       x = "Tanggal",
+       y = "Jumlah Penumpang") +
+  theme_minimal()+
+  geom_line(aes(y = mean(penumpang)),col="darkred")
+```
+Terlihat pola deret waktu cenderung stasioner dalam rataan karenba bergerak di sekitar 6600an dan memiliki ragam yang cenderung stasioner pula. Pola musiman yang sebelumnya kita dapatkan lewat ACF dan PACF terlihat pada data ini.
+
+### ACF, PACF, EACF
+```{r}
+acf(dt1$penumpang, main = "ACF",lag.max=30)
+pacf(dt1$penumpang, main = "PACF",lag.max=30)
+eacf(dt1$penumpang)
+```
+Pola ACF seperti gelombang sinus, namun dengan pola mingguan juga. EACF menunjukkan kemungkinan model AR(1) atau AR(3).
+
+### Cek Stasioner dalam Rataan
+Sama seperti sebelumnya telah dijelaskan hipotesis dari uji ADF
+```{r}
+adf.test(dt1$penumpang)
+```
+Kesimpulan yang didapat data juga stasioner dalam rataan
+
+### Cek Stasioner dalam Ragam
+```{r}
+index2 <- c(1:dim(dt1)[1])
+bc2 <- boxcox(penumpang~index2, data = dt1, lambda = seq(-4,4,0.01))
+lambda2 <- bc2$x[which.max(bc2$y)]
+lambda2
+
+bc2$x[bc2$y > max(bc2$y) - 1/2 * qchisq(0.95,1)] %>% min()
+bc2$x[bc2$y > max(bc2$y) - 1/2 * qchisq(0.95,1)] %>% max()
+
+```
+Terlihat selang kepercayaan boxcox yaitu **-2.71** hingga **3.19** mengandung nilai 1. Yang berarti ragam dari data stasioner.
+
+## Split 2
+### Split Data
+```{r}
+dt2 <- dt[59:dim(dt)[1],] ### data dari pengamtan ke 59 ke 116
+```
+### Visualisasi Data
+```{r}
+ggplot(dt2, aes(x = tanggal, y = penumpang)) +
+  geom_line() +
+  labs(title = "Jumlah Penumpang Pesawat Berangkat dari Bandara BPN",
+       x = "Tanggal",
+       y = "Jumlah Penumpang") +
+  theme_minimal()+
+  geom_line(aes(y = mean(penumpang)),col="darkred")
+```
+Terlihat pola deret waktu cenderung stasioner dalam rataan karenba bergerak di sekitar 6900an dan memiliki ragam yang cenderung stasioner pula. Pola musiman yang sebelumnya kita dapatkan lewat ACF dan PACF juga terlihat pada data ini.
+
+### ACF, PACF, EACF
+```{r}
+acf(dt2$penumpang, main = "ACF",lag.max=30)
+pacf(dt2$penumpang, main = "PACF",lag.max=30)
+eacf(dt2$penumpang)
+```
+Pola ACF seperti gelombang sinus, namun dengan pola mingguan juga. EACF menunjukkan kemungkinan model ARMA(4,1).
+
+### Cek Stasioner dalam Rataan
+Sama seperti sebelumnya telah dijelaskan hipotesis dari uji ADF
+```{r}
+adf.test(dt2$penumpang)
+```
+Kesimpulan yang didapat data juga stasioner dalam rataan.
+
+### Cek Stasioner dalam Ragam
+```{r}
+index3 <- c(1:dim(dt2)[1])
+bc3 <- boxcox(penumpang~index3, data = dt2, lambda = seq(-4,4,0.01))
+lambda3 <- bc3$x[which.max(bc3$y)]
+lambda3
+
+bc3$x[bc3$y > max(bc3$y) - 1/2 * qchisq(0.95,1)] %>% min()
+bc3$x[bc3$y > max(bc3$y) - 1/2 * qchisq(0.95,1)] %>% max()
+```
+Terlihat selang kepercayaan boxcox yaitu **-2** hingga **2.89** mengandung nilai 1. Yang berarti ragam dari data stasioner.
+
+## Kesimpulan
+Dari hasil analisis yang telah dilakukan, dapat disimpulkan bahwa data jumlah penumpang pesawat berangkat dari bandara BPN stasioner dalam rataan dan ragam. Pola musiman yang terdapat pada data adalah pola mingguan.

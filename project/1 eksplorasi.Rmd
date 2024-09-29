@@ -1,0 +1,126 @@
+---
+title: "Eksplorasi 1"
+author: "Indra Mahib Z. R"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tseries)
+library(MASS)
+library(lmtest)
+library(TSA)
+library(forecast)
+```
+
+## Data
+
+```{r}
+dt<-read.csv("D:\\IPB\\5\\MPDW\\data\\dt_BPN_impute.csv")
+str(dt)
+```
+```{r}
+names(dt) <- c("tanggal","penumpang")
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+str(dt)
+```
+
+## Eksplorasi
+### TS Plot
+```{r}
+dt.ts <- ts(dt$penumpang)
+plot(dt.ts)
+```
+### ACF PACF
+```{r}
+par(mfrow=c(1,2))
+acf(dt.ts)
+pacf(dt.ts)
+```
+ACF cenderung tails off slowly
+
+```{r}
+adf.test(dt.ts)
+```
+tolak H0 data stasioner
+```{r}
+index1 <- c(1:length(dt.ts))
+boxcox(dt.ts~index1)
+```
+Tidak homogen dalam ragam kita lakukan proses transformasi dengan nilai lambda 0 maka trasnfromasi yang tepat adalah log
+
+## Transformasi
+
+```{r}
+dt.ts.log <- log(dt.ts)
+par(mfrow=c(1,2))
+plot(dt.ts)
+plot(dt.ts.log)
+```
+
+```{r}
+boxcox(dt.ts.log~index1,lambda= seq(-2,5,0.1))
+```
+sudah memuat angka 1
+
+### Differencing
+
+```{r}
+dt.ts.diff <- diff(dt.ts.log,differences = 1)
+plot(dt.ts.diff)
+dt.ts.diff <- dt.ts.diff + 1
+index2 <- c(1:length(dt.ts.diff))
+boxcox(dt.ts.diff~index2,lambda= seq(-2,5,1)) ## aman
+```
+
+
+
+### ACF PACF
+
+```{r}
+par(mfrow=c(1,2))
+acf(dt.ts.diff)
+pacf(dt.ts.diff)
+```
+model tentatif yang mungkin dapat dibentuk adalah AR(3) atau MA(1)
+
+```{r}
+eacf(dt.ts.diff)
+```
+model tentatif yang mungkin bisa dibentuk adalah ARIMA(1,1,2) atau ARIMA (1,1,3)
+
+## Modelling
+```{r}
+dt.ts.diff <- dt.ts.diff - 1
+model1 <- arima(dt.ts.diff,order = c(0,0,3))
+model2 <- arima(dt.ts.diff,order = c(0,0,1))
+model3 <- arima(dt.ts.diff,order = c(1,0,2))
+model4 <- arima(dt.ts.diff,order = c(1,0,3))
+```
+
+### Model 1
+```{r}
+model1 ## 2/4 sig
+coeftest(model1) 
+```
+### Model 2
+```{r}
+model2 ## 1/2
+coeftest(model2) 
+```
+```{r}
+model3 ## intersep ngga
+coeftest(model3) 
+```
+```{r}
+model4 ## 4/5 signifikan
+coeftest(model4) 
+```
+## Diagnostik MA(1)
+
+```{r}
+tsdiag(model2)
+```
+

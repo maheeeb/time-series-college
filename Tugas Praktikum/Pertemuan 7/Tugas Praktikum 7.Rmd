@@ -1,5 +1,5 @@
 ---
-title: "Tugas Pertemuan 6"
+title: "Tugas Pertemuan 7"
 author: "Indra Mahib Z. R"
 date: "`r Sys.Date()`"
 output: rmdformats::readthedown
@@ -82,10 +82,6 @@ bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% max()
 ```
 Terlihat selang kepercayaan boxcox yaitu **-1.76** hingga **1.84** mengandung nilai 1. Yang berarti ragam dari data stasioner.
 
-### Seasonal
-```{r}
-
-```
 
 
 ## Pemodelan ARIMA dan SARIMA
@@ -208,8 +204,23 @@ Nilai tengah sisaan sama dengan 0
 
 Model terbaik adalah model SAR (3,0,0)[7] namun tidak memenuhi asumsi sisaan menyebar normal.  Namun asumsi ini dapat kita abaikan karena data yang kita miliki cukup banyak. 
 
+## Forecasting
+Karena model yang kita miliki sudah sesuai, kita dapat melakukan forecasting.
+```{r}
+hasil.forecast <- forecast(fit.sarima4,h=30)
+hasil.forecast
+```
+```{r}
+plot(hasil.forecast)
+```
+
+```{r}
+ts.plot(dt.ts,hasil.forecast$mean, col = c("black","red"), lty = c(1,2))
+```
 
 
+
+Data hasil prediksi yang kita memperoleh mampu mengankap pola dari data latih yang diguanakan.
 
 
 

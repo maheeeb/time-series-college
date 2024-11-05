@@ -1,0 +1,189 @@
+---
+title: "sarima-garch"
+author: "Indra Mahib Zuhair Riyanto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r }
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+library(FinTS)
+library(fGarch)
+library(rugarch)
+```
+
+## Data
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\project\\5 data\\2023-2024-fixed.csv")
+head(dt)
+tail(dt)
+```
+```{r}
+names(dt)[1] <- "tanggal"
+
+ggplot()+
+  geom_line(aes(x=1:length(dt$passenger), y=dt$passenger), color="blue")
+```
+
+
+```{r}
+dt.ts <- ts((dt$passenger))
+plot((dt.ts))
+```
+
+### Train Test Split
+```{r}
+train.ts <- dt.ts[1:578] %>% ts()
+test.ts <- dt.ts[579:length(dt.ts)] %>% ts()
+
+## plot data train and test
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)+length(train.ts)), y=test.ts), color="red")
+```
+train test split process sudah sesuai.
+
+## Fourier
+```{r}
+fourier.train <- fourier(ts(train.ts,frequency=7), K=2)
+fourier.train[,2]
+ggplot()+
+  geom_line(aes(x=1:length(fourier.train[1:14,2]), y=fourier.train[1:14,2]), color="blue")
+
+
+```
+
+
+
+## Prophet 
+```{r}
+library(prophet)
+m.df <- data.frame(ds = as.Date(dt$tanggal[1:length(train.ts)]), y = train.ts)
+m <- prophet(m.df)
+
+m
+
+future <- make_future_dataframe(m, periods = 365)
+forecast <- predict(m, future)
+plot(m,forecast)
+prophet_plot_components(m, forecast)
+```
+
+
+
+
+
+
+
+
+
+## MSTL Decompose
+```{r}
+mstl.train <- mstl(train.ts, seasonal.window = "periodic", robust = TRUE)
+plot(mstl.train)
+
+tbats.train <- tbats(train.ts)
+plot(tbats.train)
+
+write.csv(mstl.train, "D:\\IPB\\5\\MPDW\\project\\8 decompose\\seasonal_mstl.csv")
+```
+
+
+## MA Decompose
+```{r}
+train.ts <- ts(train.ts, frequency = 7)
+train.dc <- decompose(train.ts)
+plot(train.dc)
+train.dc2 <- decompose(train.ts,type="multiplicative")
+plot(train.dc2)
+train.dc$seasonal
+write.csv(train.dc$trend, "D:\\IPB\\5\\MPDW\\project\\8 decompose\\trend_ma.csv")
+write.csv(train.dc2$trend, "D:\\IPB\\5\\MPDW\\project\\8 decompose\\trend_ma_mult.csv")
+```
+
+
+```{r}
+resid <- train.dc$random
+shapiro.test(resid)
+Box.test(resid,  type="Ljung-Box")
+Box.test(resid^2,  type="Ljung-Box")
+```
+
+### LSTM Fit Add
+```{r}
+train_ma <- read.csv("D:\\IPB\\5\\MPDW\\project\\8 decompose\\predicted_ma_train_fix.csv")
+#head(train_ma)
+rataanMA <- mean(train_ma$X0)
+hybrid_train <- c(rataanMA,rataanMA,rataanMA,rataanMA,train_ma$X0) + train.dc$seasonal
+lstm_train <- c(rataanMA,rataanMA,rataanMA,rataanMA,train_ma$X0)
+
+ggplot()+
+  geom_line(aes(x=1:length(hybrid_train), y=hybrid_train), color="blue")+
+  geom_line(aes(x=(1:length(train.ts)), y=train.ts), color="red")
+
+accuracy(hybrid_train, train.ts)
+accuracy(lstm_train,train.ts)
+```
+### LSTM fit mult
+```{r}
+train_ma_mult <- read.csv("D:\\IPB\\5\\MPDW\\project\\8 decompose\\mult\\trend_train_mult.csv")
+head(train_ma_mult)
+rataanMA_mult <- mean(train_ma_mult$X0)
+hybrid_train_mult <- c(rataanMA_mult,rataanMA_mult,rataanMA_mult,rataanMA_mult,train_ma_mult$X0) * train.dc2$seasonal
+lstm_train <- c(rataanMA_mult,rataanMA_mult,rataanMA_mult,rataanMA_mult,train_ma_mult$X0)
+
+ggplot()+
+  geom_line(aes(x=1:length(hybrid_train_mult), y=hybrid_train_mult), color="blue")+
+  geom_line(aes(x=(1:length(train.ts)), y=train.ts), color="red")
+
+accuracy(hybrid_train_mult, train.ts)
+accuracy(lstm_train,train.ts)
+```
+
+### LSTM Fit Add Test
+```{r}
+test_ma <- read.csv("D:\\IPB\\5\\MPDW\\project\\8 decompose\\trend_ma_test (1).csv")
+head(test_ma)
+
+hybrid.test <- train.dc$seasonal[10:70] + test_ma$X0
+
+ggplot()+
+  geom_line(aes(x=1:length(hybrid.test), y=hybrid.test), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)), y=test.ts), color="red")
+
+accuracy(ts(test_ma$X0),ts(test.ts))
+accuracy(ts(hybrid.test),ts(test.ts))
+```
+
+### LSTM Fit Mult Test
+```{r}
+test_ma_mult <- read.csv("D:\\IPB\\5\\MPDW\\project\\8 decompose\\mult\\trend_test_mult.csv")
+head(test_ma_mult)
+
+hybrid.test_mult <- train.dc2$seasonal[13:73] * test_ma_mult$X0
+lstm.test <- test_ma_mult$X0
+
+ggplot()+
+  geom_line(aes(x=1:length(hybrid.test_mult), y=hybrid.test_mult), color="blue")+
+  geom_line(aes(x=(1:length(lstm.test)), y=lstm.test), color="green")+
+  geom_line(aes(x=(1:length(test.ts)), y=test.ts), color="red")
+
+accuracy(ts(test_ma_mult$X0),ts(test.ts))
+accuracy(ts(hybrid.test_mult),ts(test.ts))
+
+length(test.ts)
+
+```
+
+
+
+

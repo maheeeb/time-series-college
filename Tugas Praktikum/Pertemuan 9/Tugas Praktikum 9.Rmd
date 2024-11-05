@@ -1,0 +1,240 @@
+---
+title: "Tugas Pertemuan 9 - SARIMA"
+author: "Indra Mahib Z. R"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+## Library
+```{r, warning=FALSE, message=FALSE}
+library(TSA)
+library(dplyr)
+library(ggplot2)
+library(tseries) ## adf.test
+library(MASS) ## boxcox
+library(forecast)
+library(lmtest)
+```
+
+## Load Data
+Data yang digunakan merupakan data yang berasal dari SIASATI (Sistem Informasi Angkutan dan Saruna Transportasi Indonesia) yang berisi data jumlah penumpang pesawat berangkat dari bandara BPN.
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\data\\others\\dt_pt3.csv")
+head(dt)
+```
+### Preprocessing Data
+```{r}
+names(dt) <- c("tanggal","penumpang")
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+summary(dt)
+```
+
+## Data Keseluruhan
+### Visualisasi Data
+```{r}
+ggplot(dt, aes(x = tanggal, y = penumpang)) +
+  geom_line() +
+  labs(title = "Jumlah Penumpang Pesawat Berangkat dari Bandara BPN",
+       x = "Tanggal",
+       y = "Jumlah Penumpang") +
+  theme_minimal()+
+  geom_line(aes(y = mean(penumpang)),col="darkred")
+```
+Terlihat pola deret waktu cenderung stasioner dalam rataan karenba bergerak di sekitar 6500an dan memiliki ragam yang cenderung stasioner pula. Namun, terdapat beberapa waktu yang memilik ragam lebih besar atau lebih kecil. Selanjutnya kita akan melihat lebih dalam terkait penemuan ini.
+
+## Train Test Split
+```{r}
+train.ts <- dt$penumpang[1:round(length(dt$penumpang)*0.80)] %>% ts()
+test.ts <- dt$penumpang[(round(length(dt$penumpang)*0.80)+1):length(dt$penumpang)] %>% ts()
+
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)+length(train.ts)), y=test.ts), color="red")+
+  labs(title="Pembagian Data",
+       x = "Periode",
+       y = "Penumpang")+
+  theme_minimal()
+```
+
+
+### ACF, PACF, EACF
+```{r}
+acf(train.ts, main = "ACF",lag.max=60)
+pacf(train.ts, main = "PACF",lag.max=60)
+eacf(train.ts)
+```
+
+Terlihat dari plot ACF dan PACF bahwa deret waktu memiliki pola yang cenderung seasonal. Kemungkinan besar pola musim yang ada adalah pola mingguan.
+
+Dari hasil EACF kemungkinan model yang cocok adalah ARMA(0,1), ARMA(1,1), atau ARMA(1,2)
+
+Melihat dari pola musiman maka kemungkinan model yang terbentuk adalah ARIMA(0,0,1)(1,0,0)[7], ARIMA(1,0,1)(1,0,0)[7], atau ARIMA(1,0,2)(1,0,0)[7]
+
+
+### Cek Stasioner dalam Rataan
+Untuk mengecek kestasioneran dari rataan kita dapat melihat secara eksploratif dan melakukan Uji Dickey-Fuller.
+
+- $H_0$ : Deret waktu tidak stasioner dalam rataan
+- $H_1$ : Deret waktu stasioner dalam rataan
+
+
+```{r}
+adf.test(train.ts)
+```
+Hasil pengujian mendukung kecenderungan dari eksplorasi data sebelumnya yaitu data stasioner dalam rataan.
+
+### Cek Stasioner dalam Ragam
+Untuk mengecek kestasioneran dari ragam kita dapat menggunakan box-cox.
+
+```{r}
+index1 <- c(1:length(train.ts))
+bc1 <- boxcox(train.ts~index1, lambda=seq(-4,2,0.1))
+lambda1 <- bc1$x[which.max(bc1$y)]
+lambda1
+
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% min()
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% max()
+```
+Terlihat selang kepercayaan boxcox yaitu **-2.8** hingga **1.27** mengandung nilai 1. Yang berarti ragam dari data stasioner.
+
+
+
+## Pemodelan SARIMA
+```{r}
+dt.ts <- ts(dt$penumpang)
+fit.auto <- auto.arima(train.ts)
+fit.auto
+lmtest::coeftest(fit.auto)
+```
+
+### SARIMA(0,0,1)(1,0,0)[7]
+```{r}
+fit.sarima <- Arima(train.ts, order = c(0,0,1), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima
+coeftest(fit.sarima)
+```
+### SARIMA(1,0,1)(1,0,0)[7]
+```{r}
+fit.sarima2 <- Arima(train.ts, order = c(1,0,1), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima2
+coeftest(fit.sarima2)
+```
+### SARIMA(1,0,2)(1,0,0)[7]
+```{r}
+fit.sarima3 <- Arima(train.ts, order = c(1,0,2), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima3
+coeftest(fit.sarima3)
+
+```
+### SARIMA(0,0,0)(1,0,0)[7]
+```{r}
+fit.sarima4 <- Arima(train.ts, order = c(0,0,0), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima4
+coeftest(fit.sarima4)
+
+```
+
+
+### Pemilihan Model Terbaik
+```{r}
+list.model <- c("SARIMA(0,0,1)(1,0,0)[7]","SARIMA(1,0,1)(1,0,0)[7]","SARIMA(1,0,2)(1,0,0)[7]","SARIMA(0,0,0)(1,0,0)[7]")
+list.aic <- c(fit.sarima$aic,fit.sarima2$aic,fit.sarima3$aic,fit.sarima4$aic)
+
+data.frame(list.model,list.aic)
+```
+Dari hasil pemodelan terlihat bahwa model terbaik adalah SARIMA(0,0,0)(1,0,0)[7] dengan nilai AIC dan seluruh parameter signifikan
+
+### Overfitting
+```{r}
+fit.sarima5 <- Arima(train.ts, order = c(1,0,0), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima5
+coeftest(fit.sarima2)
+```
+```{r}
+fit.sarima6 <- Arima(train.ts, order = c(0,0,1), seasonal = list(order = c(1,0,0), period = 7))
+fit.sarima6
+coeftest(fit.sarima6)
+```
+```{r}
+fit.sarima7 <- Arima(train.ts, order = c(0,0,0), seasonal = list(order = c(2,0,0), period = 7))
+fit.sarima7
+coeftest(fit.sarima7)
+```
+```{r}
+fit.sarima8 <- Arima(train.ts, order = c(0,0,0), seasonal = list(order = c(1,0,1), period = 7))
+fit.sarima8
+coeftest(fit.sarima8)
+```
+### Kesimpulan Overfitting
+
+SARIMA(0,0,0)(1,0,1)[7] merupakan model terbaik karena memiliki nilai AIC dan seluruh parameter signifikan.
+## Diagnosa Model
+
+### Modelling
+```{r}
+fit.sarima8
+```
+### Eksplorasi Sisaan
+```{r}
+sisaan.sarima <- fit.sarima8$residuals
+par(mfrow=c(2,2))
+qqnorm(sisaan.sarima)
+qqline(sisaan.sarima, col = "blue", lwd = 2)
+plot(c(1:length(sisaan.sarima)),sisaan.sarima)
+acf(sisaan.sarima)
+pacf(sisaan.sarima)
+par(mfrow = c(1,1))
+```
+### Uji Formal
+```{r}
+ks.test(sisaan.sarima,"pnorm") 
+```
+tolak H0 sehingga sisaan tidak normal
+
+
+```{r}
+#2) Sisaan saling bebas/tidak ada autokorelasi
+Box.test(sisaan.sarima, type = "Ljung") 
+#tak tolak H0 > sisaan saling bebas
+```
+Sisaan tidak saling bebas
+
+```{r}
+#3) Sisaan homogen
+Box.test((sisaan.sarima)^2, type = "Ljung") 
+#tak tolak H0 > sisaan homogen
+```
+Ragam Homogen
+
+```{r}
+#4) Nilai tengah sisaan sama dengan nol
+t.test(sisaan.sarima, mu = 0, conf.level = 0.95) 
+#tak tolak h0 > nilai tengah sisaan sama dengan 0
+```
+Nilai tengah sisaan sama dengan 0
+
+### Kesimpulan
+
+Model terbaik adalah model SARMA (1,0,1)[7] namun tidak memenuhi asumsi sisaan menyebar normal.  Namun asumsi ini dapat kita abaiakan karena tidak berpengaruh ke permalana.
+
+## Forecasting
+Karena model yang kita miliki sudah sesuai, kita dapat melakukan forecasting.
+```{r}
+hasil.forecast <- forecast::forecast(fit.sarima8,h=length(test.ts))
+plot(hasil.forecast)
+```
+
+```{r}
+dt.ts <- ts(dt$penumpang)
+ts.plot(dt.ts,hasil.forecast$mean, col = c("black","red"), lty = c(1,2))
+```
+
+
+```{r}
+accuracy(ts(hasil.forecast$mean),ts(test.ts))
+```
+Hasil prediksi menunjukan MAPE sebesar 6% yang menunjukan hasil peramalan yang cukup baik.
+
+
+

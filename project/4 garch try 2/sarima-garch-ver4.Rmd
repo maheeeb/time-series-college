@@ -1,0 +1,352 @@
+---
+title: "bismillah"
+author: "Indra Mahib Zuhair Riyanto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+library(FinTS)
+library(fGarch)
+library(rugarch)
+```
+
+## Load Data
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\project\\5 data\\2019-2024.csv")
+head(dt)
+```
+
+```{r}
+dt <- dt %>% filter(ID.Prasarana=="BPN") %>% 
+  select(Tanggal, Penumpang.Berangkat, Penumpang.Tiba) %>% 
+  rename(tanggal = Tanggal, brgkt = Penumpang.Berangkat, tiba = Penumpang.Tiba)
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+str(dt)
+```
+## Eksplorasi
+```{r}
+ggplot(dt, aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+```
+
+```{r}
+
+dt %>% filter(tanggal >= "2022-09-30") %>% 
+  ggplot(aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+
+dt %>% filter(tanggal >= "2023-01-01") %>% 
+  ggplot(aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+
+dt.ts <- dt %>% filter(tanggal >= "2022-09-30")
+```
+
+```{r}
+dt.ts %>% filter(brgkt==0 | tiba==0)
+```
+```{r}
+for(i in 1:dim(dt.ts)[1]){
+  if(dt.ts$brgkt[i]==0){
+    dt.ts$brgkt[i] <- (dt.ts$brgkt[i-1] + dt.ts$brgkt[i+1])/2
+    dt.ts$tiba[i] <- (dt.ts$tiba[i-1] + dt.ts$tiba[i+1])/2
+  }
+}
+```
+
+
+```{r}
+dt.ts$passenger <- dt.ts$brgkt + dt.ts$tiba
+```
+
+
+```{r}
+dt.ts %>% 
+  ggplot()+
+  geom_line(aes(tanggal, (passenger)))
+
+write.csv(dt, "D:\\IPB\\5\\MPDW\\project\\5 data\\2023-2024.csv")
+```
+
+
+```{r}
+dt.ts.ts <- ts(dt.ts$passenger)
+```
+
+## Train Test Split
+```{r}
+train.ts <- dt.ts.ts[1:(round(length(dt.ts.ts)*0.83))] %>% ts()
+test.ts <- dt.ts.ts[((round(length(dt.ts.ts)*0.83)+1)):length(dt.ts.ts)] %>% ts()
+
+## plot data train and test
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)+length(train.ts)), y=test.ts), color="red")
+```
+
+## Stasioner ?
+
+```{r}
+acf(train.ts)
+```
+
+
+
+```{r}
+index.train <- 1:length(train.ts)
+boxcox(train.ts~index.train, lambda = seq(-2, 2, 0.1))
+```
+
+```{r}
+adf.test(train.ts, alternative = "stationary")
+```
+
+Secara umum kestasioneran dari data sudah terpenuhi. Namun plot ACF menunjukan pola slowly tails off
+
+### Differencing Biasa
+
+```{r}
+train.diff1 <- diff(train.ts)
+plot(train.diff1)
+```
+
+```{r}
+index.train.diff1 <- 1:length(train.diff1)
+boxcox(train.diff1 - (min(train.diff1)-1)~index.train.diff1, lambda = seq(-2, 2, 0.1))
+```
+```{r}
+acf(train.diff1,lag.max=60)
+```
+musiman masih bleum stasioner
+
+### Differencing Musiman
+
+```{r}
+train.diff2 <- diff(train.diff1, lag=7)
+plot(train.diff2)
+```
+
+```{r}
+index.train.diff2 <- 1:length(train.diff2)
+boxcox(train.diff2 - (min(train.diff2)-1)~index.train.diff2, lambda = seq(-2, 2, 0.05))
+```
+```{r}
+adf.test(train.diff2, alternative = "stationary")
+```
+
+
+## Identifikasi Model
+```{r}
+auto.arima(train.diff2)
+```
+
+```{r}
+acf(train.diff2,lag.max=60)
+pacf(train.diff2,lag.max=60)
+eacf(train.diff2,ar.max=10,ma.max=10)
+```
+Model tentatif
+
+ARIMA(0,1,2)(0,1,0)7 -> from auto arima
+ARIMA(2,1,0)(0,1,1)7 assuming pacf cutoff
+ARIMA(0,1,2)(0,1,1)7 assuming acf cutoff
+ARIMA(2,1,2)(0,1,1)7 gabungan acf pacf
+ARIMA(1,1,3)(0,1,1)7 eacf
+
+## Fitting Model
+### Model 1
+```{r}
+model1 <- Arima(train.ts, order=c(0,1,2), seasonal = list(order=c(0,1,0), period=7))
+summary(model1)
+lmtest::coeftest(model1)
+```
+### Model 2
+```{r}
+model2 <- Arima(train.ts, order=c(2,1,0), seasonal = list(order=c(0,1,1), period=7))
+summary(model2)
+lmtest::coeftest(model2)
+```
+
+### Model 3
+```{r}
+model3 <- Arima(train.ts, order=c(0,1,2), seasonal = list(order=c(0,1,1), period=7))
+summary(model3)
+lmtest::coeftest(model3)
+```
+### Model 4
+```{r}
+model4 <- Arima(train.ts, order=c(2,1,2), seasonal = list(order=c(0,1,1), period=7))
+summary(model4)
+lmtest::coeftest(model4)
+```
+### Model 5
+```{r}
+model5 <- Arima(train.ts, order=c(1,1,2), seasonal = list(order=c(0,1,1), period=7))
+summary(model5)
+lmtest::coeftest(model5)
+```
+### Kesimpulan
+Model 3 terbaik. kita overfitting.
+
+## Overfitting
+### Komponen Biasa
+```{r}
+model6 <-Arima(train.ts, order=c(1,1,2), seasonal = list(order=c(0,1,1), period=7))
+summary(model6)
+lmtest::coeftest(model6)
+```
+
+```{r}
+model7 <- Arima(train.ts, order=c(0,1,3), seasonal = list(order=c(0,1,1), period=7))
+summary(model7)
+lmtest::coeftest(model7)
+```
+### Musiman
+```{r}
+model8 <- Arima(train.ts, order=c(0,1,2), seasonal = list(order=c(0,1,2), period=7))
+summary(model8)
+lmtest::coeftest(model8)
+```
+```{r}
+model9 <- Arima(train.ts, order=c(0,1,2), seasonal = list(order=c(1,1,1), period=7))
+summary(model9)
+lmtest::coeftest(model9)
+```
+### Kesimpulan (MOD3)
+Model 3 tetap terbaik
+
+## Diagnostik Sisaan
+```{r}
+sisaan <- model3$residuals
+qqnorm(sisaan)
+qqline(sisaan, col = "blue", lwd = 2)
+plot(c(1:length(sisaan)),sisaan)
+acf(sisaan)
+pacf(sisaan)
+
+write.csv(sisaan, "D:\\IPB\\5\\MPDW\\project\\5 data\\sisaan_sarima.csv")
+```
+
+```{r}
+ks.test(sisaan,"pnorm")
+```
+
+```{r}
+Box.test(sisaan, type="Ljung-Box")
+```
+```{r}
+Box.test(sisaan, type="Ljung-Box", lag=7)
+```
+
+```{r}
+Box.test(sisaan^2, type="Ljung-Box")
+```
+### Kesimpulan
+Ragam sisaan tidak homogen dan tidak menyebar normal
+
+## ARCH-LM Test
+```{r}
+for(i in seq(1,10,1)){
+  cat("Lags: ",i,"\n")
+  print(ArchTest(sisaan, lags = i)$p.value)
+}
+```
+### Kesimpulan
+Ada efek ARCH yang berkepanjang , membuat kita menduga bahwa ada GARCH pada sisaan
+
+## GARCH
+### Trial and Eror
+```{r}
+minmax <- function(x){
+  return((x-min(x))/(max(x)-min(x)))
+}
+```
+### GARCH(1,1)
+```{r}
+garch11 <- garchFit(~garch(1,1), data = (sisaan), trace = F)
+summary(garch11)
+```
+
+
+```{r}
+set.seed(31)
+eps.train <- rnorm(length(train.ts), mean = 0, sd =1)
+```
+
+```{r}
+epsilon.train <- sqrt(garch11@sigma.t) * eps.train
+hasil.hybrid1 <- model3$fitted + epsilon.train 
+```
+
+### Evaluation Train
+
+```{r}
+# calculate mape
+mape <- function(actual, forecast){
+  return(mean(abs((actual - forecast)/actual)))
+}
+
+mape(train.ts, model3$fitted) * 100
+mape(train.ts, hasil.hybrid1) * 100
+
+```
+### Prediction
+
+```{r}
+mean.predict = forecast(model3, h = length(test.ts))$mean
+garch.predict = predict(garch11, n.ahead = length(test.ts))
+garch.predict
+eps.test <- rnorm(length(test.ts), mean = 0, sd =1)
+epsilon.test <- garch.predict$standardDeviation * eps.test
+predict.hybrid1 <- mean.predict + epsilon.test
+```
+
+```{r}
+accuracy(ts(predict.hybrid1), ts(test.ts))
+accuracy(ts(mean.predict), (test.ts))
+```
+```{r}
+ggplot()+
+  geom_line(aes(x=1:length(test.ts), y=test.ts), color="red")+
+  geom_line(aes(x=1:length(predict.hybrid1), y=predict.hybrid1), color="blue")+
+  geom_line(aes(x=1:length(mean.predict), y=mean.predict), color="green")
+```
+
+## Decomposition
+```{r}
+train.ts.dc <- ts(train.ts, frequency = 365)
+train.ts.year <- ts(train.ts.dc, frequency = 365)
+decomp_train <- decompose(train.ts.dc)
+```
+
+### Plot Decomposition
+```{r}
+plot(decomp_train)
+```
+```{r}
+train.seasonal <- decomp_train$seasonal
+acf(train.seasonal)
+```
+```{r}
+pacf(train.seasonal)
+```
+
+```{r}
+seasonal <- Arima(train.seasonal, order=c(0,0,0), seasonal = list(order=c(3,0,0), period=7))
+```
+
+

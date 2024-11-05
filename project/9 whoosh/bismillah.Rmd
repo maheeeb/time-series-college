@@ -1,0 +1,723 @@
+---
+title: "Whoosh-bismillah"
+author: "Indra Mahib Zuhair Riyanto"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+## Libs and Function
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forecast)
+library(TSA)
+library(car)
+library(lmtest)
+library(tseries)
+library(Rssa)
+
+build_c <- function(r,groups){
+  hasil <- r[[1]]
+  for(i in 2:groups){
+    hasil <- hasil + r[[i]]
+  }
+  return(hasil)
+}
+
+```
+
+## Load Data
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\project\\9 whoosh\\whoosh_data.csv")
+head(dt)
+```
+
+### Fixing Formats
+
+```{r}
+dt <- dt %>% select(-X) %>%
+  rename(tanggal = Tanggal) %>%
+  mutate(tanggal = as.Date(tanggal, format = "%Y-%m-%d"))
+str(dt)
+```
+### TS data
+```{r}
+dt.ts <- ts(dt$passenger)
+plot(dt.ts)
+```
+
+
+## SARIMA
+### Skenario 1
+```{r}
+train1 <- dt.ts[1:(round(length(dt.ts)*0.70)+3)] %>% ts()
+test1 <- dt.ts[(round(length(dt.ts)*0.70)+4):length(dt.ts)] %>% ts()
+
+ggplot()+
+  geom_line(aes(x=1:length(train1), y=train1), color="blue")+
+  geom_line(aes(x=(1:length(test1)+length(train1)), y=test1), color="red")+
+  labs(title="Pembagian Data Skenario 1",
+       x = "Periode",
+       y = "Penumpang")
+
+#length(train1) #236
+#length(test1) #97
+```
+#### Eksplorasi 
+```{r}
+plot(train1)
+acf(train1,lag.max = 70)
+```
+```{r}
+adf.test(train1)
+index.train1 <- 1:length(train1)
+bc.train1 <- boxCox(train1~index.train1, lambda = seq(-2, 2, 0.1))
+lambda1 <- bc.train1$x[which(bc.train1$y == max(bc.train1$y))]
+lambda1 # 1.4343
+```
+
+```{r}
+train1.tf <- forecast::BoxCox(train1, lambda1)
+plot(train1.tf)
+acf(train1.tf,lag.max = 70)
+```
+```{r}
+train1.diff <- diff(train1.tf, lag = 1)
+acf(train1.diff,lag.max=70)
+```
+
+```{r}
+train1.diff2 <- diff(train1.diff, lag = 7)
+```
+
+#### Model Identification
+```{r}
+acf(train1.diff2,lag.max=70)
+pacf(train1.diff2,lag.max=70)
+eacf(train1.diff2)
+```
+
+Model Tentatif
+1. ARIMA(0,1,2)(0,1,1)[7]
+2. ARIMA(2,1,0)(0,1,1)[7]
+3. ARIMA(2,1,2)(0,1,1)[7]
+4. ARIMA(0,1,2)(5,1,0)[7]
+5. ARIMA(2,1,0)(5,1,0)[7]
+6. ARIMA(2,1,2)(5,1,0)[7]
+
+
+#### Pendugaan Parameter
+```{r}
+model1.1 <- Arima(train1, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(model1.1)
+coeftest(model1.1)
+aic1.1 <- AIC(model1.1)
+sigs1.1 <- "all"
+```
+```{r}
+model1.2 <- Arima(train1, order = c(2,1,0), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(model1.2)
+coeftest(model1.2)
+aic1.2 <- AIC(model1.2)
+sigs1.2 <- "1 not sig"
+```
+
+```{r}
+model1.3 <- Arima(train1, order = c(2,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(model1.3)
+coeftest(model1.3)
+aic1.3 <- AIC(model1.3)
+sigs1.3 <- "not sig 1"
+```
+
+```{r}
+model1.4 <- Arima(train1, order = c(0,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda1)
+summary(model1.4)
+coeftest(model1.4)
+aic1.4 <- AIC(model1.4)
+sigs1.4 <- "all"
+```
+
+```{r}
+model1.5 <- Arima(train1, order = c(2,1,0), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda1)
+summary(model1.5)
+coeftest(model1.5)
+aic1.5 <- AIC(model1.5)
+sigs1.5 <- "1 not sig"
+```
+
+```{r}
+model1.6 <- Arima(train1, order = c(2,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda1)
+summary(model1.6)
+coeftest(model1.6)
+aic1.6 <- AIC(model1.6)
+sigs1.6 <- "not sig 2"
+```
+
+#### Model Selection
+```{r}
+aic1 <- c(aic1.1, aic1.2, aic1.3, aic1.4, aic1.5, aic1.6)
+sigs1 <- c(sigs1.1, sigs1.2, sigs1.3, sigs1.4, sigs1.5, sigs1.6)
+model1 <- c("ARIMA(0,1,2)(0,1,1)[7]", "ARIMA(2,1,0)(0,1,1)[7]", "ARIMA(2,1,2)(0,1,1)[7]", "ARIMA(0,1,2)(5,1,0)[7]", "ARIMA(2,1,0)(5,1,0)[7]", "ARIMA(2,1,2)(5,1,0)[7]")
+summary1 <- data.frame(model1, aic1, sigs1)
+summary1
+```
+Model pertama menunjukan model terbaik dengan nilai AIC terendah dan semua koefisien signifikan.
+
+#### Overfitting Underfitting
+```{r}
+of1.1 <- Arima(train1, order = c(1,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(of1.1)
+coeftest(of1.1)
+aic.of1.1 <- AIC(of1.1)
+sigs.of1.1 <- "not sig"
+```
+
+```{r}
+of1.2 <- Arima(train1, order = c(1,1,1), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(of1.2)
+coeftest(of1.2)
+aic.of1.2 <- AIC(of1.2)
+sigs.of1.2 <- "sig"
+```
+
+```{r}
+of1.3 <- Arima(train1, order = c(1,1,1), seasonal = list(order = c(0,1,2), period = 7),lambda = lambda1)
+summary(of1.3)
+coeftest(of1.3)
+aic.of1.3 <- AIC(of1.3)
+sigs.of1.3 <- "sig"
+```
+
+```{r}
+of1.4 <- Arima(train1, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda1)
+summary(of1.4)
+coeftest(of1.4)
+aic.of1.4 <- AIC(of1.4)
+sigs.of1.4 <- "sig"
+```
+
+```{r}
+of1.5 <- Arima(train1, order = c(0,1,3), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda1)
+summary(of1.5)
+coeftest(of1.5)
+```
+##### Summary OF
+```{r}
+aic.of1 <- c(aic.of1.1, aic.of1.2, aic.of1.3, aic.of1.4)
+sigs.of1 <- c(sigs.of1.1, sigs.of1.2, sigs.of1.3, sigs.of1.4)
+model.of1 <- c("ARIMA(1,1,2)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,2)[7]", "ARIMA(1,1,1)(1,1,1)[7]")
+summary.of1 <- data.frame(model.of1, aic.of1, sigs.of1)
+summary.of1
+```
+
+ARIMA(1,1,1)(1,1,1)[7] lambda 1.4343 is the best model
+
+```{r}
+model.fix1 <- Arima(train1, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda1)
+```
+
+#### Diagnostik Sisaan
+```{r}
+sisaan1 <- residuals(model.fix1)
+ks.test(sisaan1, "pnorm")
+Box.test(sisaan1, type = "Ljung-Box")
+Box.test(sisaan1^2, type = "Ljung-Box")
+```
+aman
+
+#### Performa Model
+```{r}
+## train
+accuracy(model.fix1$fitted, train1) # 13.81 % MAPE
+
+## Test
+test1.f <- forecast::forecast(model.fix1, h = length(test1))
+accuracy(ts(test1.f$mean), ts(test1)) # 13.33 % MAPE
+```
+### Skenario 2
+```{r}
+train2 <- dt.ts[1:(round(length(dt.ts)*0.80)+5)] %>% ts()
+test2 <- dt.ts[(round(length(dt.ts)*0.80)+6):length(dt.ts)] %>% ts()
+
+ggplot()+
+  geom_line(aes(x=1:length(train2), y=train2), color="blue")+
+  geom_line(aes(x=(1:length(test2)+length(train2)), y=test2), color="red")+
+  labs(title="Pembagian Data Skenario 2",
+       x = "Periode",
+       y = "Penumpang")
+
+# length(train2) # 271
+# length(test2) # 62
+```
+
+
+#### Eksplorasi 
+```{r}
+plot(train2)
+acf(train2,lag.max = 70)
+```
+```{r}
+adf.test(train2)
+index.train2 <- 1:length(train2)
+bc.train2 <- boxCox(train2~index.train2, lambda = seq(-2, 2, 0.1))
+lambda2 <- bc.train2$x[which(bc.train2$y == max(bc.train2$y))]
+lambda2
+```
+```{r}
+train2.tf <- forecast::BoxCox(train2, lambda2)
+plot(train2.tf)
+```
+```{r}
+train2.diff <- diff(train2.tf, lag = 1)
+acf(train2.diff,lag.max=70)
+```
+```{r}
+train2.diff2 <- diff(train2.diff, lag = 7)
+```
+
+#### Model Identification
+```{r}
+acf(train2.diff2,lag.max=70)
+pacf(train2.diff2,lag.max=70)
+eacf(train2.diff2)
+```
+
+Model Tentatif
+1. ARIMA(0,1,2)(0,1,1)[7]
+2. ARIMA(2,1,0)(0,1,1)[7]
+3. ARIMA(2,1,2)(0,1,1)[7]
+4. ARIMA(0,1,2)(5,1,0)[7]
+5. ARIMA(2,1,0)(5,1,0)[7]
+6. ARIMA(2,1,2)(5,1,0)[7]
+
+#### Pendugaan Parameter
+```{r}
+model2.1 <- Arima(train2, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(model2.1)
+coeftest(model2.1)
+aic2.1 <- AIC(model2.1)
+sigs2.1 <- "all"
+```
+
+```{r}
+model2.2 <- Arima(train2, order = c(2,1,0), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(model2.2)
+coeftest(model2.2)
+aic2.2 <- AIC(model2.2)
+sigs2.2 <- "1 not sig"
+```
+
+```{r}
+model2.3 <- Arima(train2, order = c(2,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(model2.3)
+coeftest(model2.3)
+aic2.3 <- AIC(model2.3)
+sigs2.3 <- "not sig 1"
+```
+
+```{r}
+model2.4 <- Arima(train2, order = c(0,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda2)
+summary(model2.4)
+coeftest(model2.4)
+aic2.4 <- AIC(model2.4)
+sigs2.4 <- "all"
+```
+
+```{r}
+model2.5 <- Arima(train2, order = c(2,1,0), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda2)
+summary(model2.5)
+coeftest(model2.5)
+aic2.5 <- AIC(model2.5)
+sigs2.5 <- "1 not sig"
+```
+```{r}
+model2.6 <- Arima(train2, order = c(2,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda2)
+summary(model2.6)
+coeftest(model2.6)
+aic2.6 <- AIC(model2.6)
+sigs2.6 <- "not sig 2"
+```
+
+#### Model Selection
+```{r}
+aic2 <- c(aic2.1, aic2.2, aic2.3, aic2.4, aic2.5, aic2.6)
+sigs2 <- c(sigs2.1, sigs2.2, sigs2.3, sigs2.4, sigs2.5, sigs2.6)
+model2 <- c("ARIMA(0,1,2)(0,1,1)[7]", "ARIMA(2,1,0)(0,1,1)[7]", "ARIMA(2,1,2)(0,1,1)[7]", "ARIMA(0,1,2)(5,1,0)[7]", "ARIMA(2,1,0)(5,1,0)[7]", "ARIMA(2,1,2)(5,1,0)[7]")
+summary2 <- data.frame(model2, aic2, sigs2)
+summary2
+```
+Model pertama menunjukan model terbaik dengan nilai AIC terendah dan semua koefisien signifikan.
+
+#### Overfitting Underfitting
+```{r}
+of2.1 <- Arima(train2, order = c(1,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(of2.1)
+coeftest(of2.1)
+aic.of2.1 <- AIC(of2.1)
+sigs.of2.1 <- "not sig 1"
+```
+```{r}
+of2.2 <- Arima(train2, order = c(1,1,1), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(of2.2)
+coeftest(of2.2)
+aic.of2.2 <- AIC(of2.2)
+sigs.of2.2 <- "sig"
+```
+
+
+```{r}
+of2.3 <- Arima(train2, order = c(1,1,1), seasonal = list(order = c(0,1,2), period = 7),lambda = lambda2)
+summary(of2.3)
+coeftest(of2.3)
+aic.of2.3 <- AIC(of2.3)
+sigs.of2.3 <- "sig"
+```
+```{r}
+of2.4 <- Arima(train2, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda2)
+summary(of2.4)
+coeftest(of2.4)
+aic.of2.4 <- AIC(of2.4)
+sigs.of2.4 <- "sig"
+```
+```{r}
+of2.5 <- Arima(train2, order = c(0,1,3), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda2)
+summary(of2.5)
+coeftest(of2.5)
+```
+##### Summary OF
+```{r}
+aic.of2 <- c(aic.of2.1,aic.of2.2, aic.of2.3, aic.of2.4)
+sigs.of2 <- c(sigs.of2.1, sigs.of2.2, sigs.of2.3, sigs.of2.4)
+model.of2 <- c("ARIMA(1,1,2)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,2)[7]", "ARIMA(1,1,1)(1,1,1)[7]")
+summary.of2 <- data.frame(model.of2, aic.of2, sigs.of2)
+summary.of2
+
+```
+
+ARIMA(1,1,1)(1,1,1)[7] lambda 1.2727 is the best model
+
+```{r}
+model.fix2 <- Arima(train2, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda2)
+```
+
+#### Diagnostik Sisaan
+```{r}
+sisaan2 <- residuals(model.fix2)
+ks.test(sisaan2, "pnorm")
+Box.test(sisaan2, type = "Ljung-Box")
+Box.test(sisaan2^2, type = "Ljung-Box")
+```
+aman
+
+#### Performa Model
+```{r}
+## train
+accuracy(model.fix2$fitted, train2) # 12.44 % MAPE
+
+## Test
+test2.f <- forecast::forecast(model.fix2, h = length(test2))
+accuracy(ts(test2.f$mean), ts(test2)) # 21.56 % MAPE
+```
+### Skenario 3
+```{r}
+train3 <- dt.ts[1:(round(length(dt.ts)*0.90)+4)] %>% ts()
+test3 <- dt.ts[(round(length(dt.ts)*0.90)+5):length(dt.ts)] %>% ts()
+
+ggplot()+
+  geom_line(aes(x=1:length(train3), y=train3), color="blue")+
+  geom_line(aes(x=(1:length(test3)+length(train3)), y=test3), color="red")+
+  labs(title="Pembagian Data Skenario 3",
+       x = "Periode",
+       y = "Penumpang")
+
+# length(train3) # 304
+# length(test3) # 29
+```
+#### Eksplorasi 
+```{r}
+plot(train3)
+acf(train3,lag.max = 70)
+```
+
+```{r}
+adf.test(train3)
+index.train3 <- 1:length(train3)
+bc.train3 <- boxCox(train3~index.train3, lambda = seq(-2, 2, 0.1))
+lambda3 <- bc.train3$x[which(bc.train3$y == max(bc.train3$y))]
+```
+
+```{r}
+train3.tf <- forecast::BoxCox(train3, lambda3)
+plot(train3.tf)
+```
+```{r}
+train3.diff <- diff(train3.tf, lag = 1)
+acf(train3.diff,lag.max=70)
+```
+```{r}
+train3.diff2 <- diff(train3.diff, lag = 7)
+adf.test(train3.diff2)
+```
+#### Model Identification
+```{r}
+acf(train3.diff2,lag.max=70)
+pacf(train3.diff2,lag.max=70)
+eacf(train3.diff2)
+```
+
+Model Tentatif
+1. ARIMA(0,1,2)(0,1,1)[7]
+2. ARIMA(2,1,0)(0,1,1)[7]
+3. ARIMA(2,1,2)(0,1,1)[7]
+4. ARIMA(0,1,2)(5,1,0)[7]
+5. ARIMA(2,1,0)(5,1,0)[7]
+6. ARIMA(2,1,2)(5,1,0)[7]
+
+#### Pendugaan Parameter
+```{r}
+model3.1 <- Arima(train3, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(model3.1)
+coeftest(model3.1)
+aic3.1 <- AIC(model3.1)
+sigs3.1 <- "all"
+```
+```{r}
+model3.2 <- Arima(train3, order = c(2,1,0), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(model3.2)
+coeftest(model3.2)
+aic3.2 <- AIC(model3.2)
+sigs3.2 <- "1 not sig"
+```
+```{r}
+model3.3 <- Arima(train3, order = c(2,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(model3.3)
+coeftest(model3.3)
+aic3.3 <- AIC(model3.3)
+sigs3.3 <- "not sig 1"
+```
+```{r}
+model3.4 <- Arima(train3, order = c(0,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda3)
+summary(model3.4)
+coeftest(model3.4)
+aic3.4 <- AIC(model3.4)
+sigs3.4 <- "all"
+```
+
+```{r}
+model3.5 <- Arima(train3, order = c(2,1,0), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda3)
+summary(model3.5)
+coeftest(model3.5)
+aic3.5 <- AIC(model3.5)
+sigs3.5 <- "1 not sig"
+```
+```{r}
+model3.6 <- Arima(train3, order = c(2,1,2), seasonal = list(order = c(5,1,0), period = 7),lambda = lambda3)
+summary(model3.6)
+coeftest(model3.6)
+aic3.6 <- AIC(model3.6)
+sigs3.6 <- "not sig 2"
+```
+#### Model Selection
+```{r}
+aic3 <- c(aic3.1, aic3.2, aic3.3, aic3.4, aic3.5, aic3.6)
+sigs3 <- c(sigs3.1, sigs3.2, sigs3.3, sigs3.4, sigs3.5, sigs3.6)
+model3 <- c("ARIMA(0,1,2)(0,1,1)[7]", "ARIMA(2,1,0)(0,1,1)[7]", "ARIMA(2,1,2)(0,1,1)[7]", "ARIMA(0,1,2)(5,1,0)[7]", "ARIMA(2,1,0)(5,1,0)[7]", "ARIMA(2,1,2)(5,1,0)[7]")
+summary3 <- data.frame(model3, aic3, sigs3)
+summary3
+```
+
+Model pertama menunjukan model terbaik dengan nilai AIC terendah dan semua koefisien signifikan.
+
+#### Overfitting Underfitting
+```{r}
+of3.1 <- Arima(train3, order = c(1,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(of3.1)
+coeftest(of3.1)
+aic.of3.1 <- AIC(of3.1)
+sigs.of3.1 <- "not sig 1"
+```
+```{r}
+of3.2 <- Arima(train3, order = c(1,1,1), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(of3.2)
+coeftest(of3.2)
+aic.of3.2 <- AIC(of3.2)
+sigs.of3.2 <- "sig"
+```
+```{r}
+of3.3 <- Arima(train3, order = c(1,1,1), seasonal = list(order = c(0,1,2), period = 7),lambda = lambda3)
+summary(of3.3)
+coeftest(of3.3)
+aic.of3.3 <- AIC(of3.3)
+sigs.of3.3 <- "sig"
+```
+```{r}
+of3.4 <- Arima(train3, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda3)
+summary(of3.4)
+coeftest(of3.4)
+aic.of3.4 <- AIC(of3.4)
+sigs.of3.4 <- "sig"
+```
+```{r}
+of3.5 <- Arima(train3, order = c(0,1,3), seasonal = list(order = c(0,1,1), period = 7),lambda = lambda3)
+summary(of3.5)
+coeftest(of3.5)
+aic.of3.5 <- AIC(of3.5)
+sigs.of3.5 <- "sig"
+```
+##### Summary OF
+```{r}
+aic.of3 <- c(aic.of3.1,aic.of3.2, aic.of3.3, aic.of3.4, aic.of3.5)
+sigs.of3 <- c(sigs.of3.1, sigs.of3.2, sigs.of3.3, sigs.of3.4, sigs.of3.5)
+model.of3 <- c("ARIMA(1,1,2)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,1)[7]", "ARIMA(1,1,1)(0,1,2)[7]", "ARIMA(1,1,1)(1,1,1)[7]", "ARIMA(0,1,3)(0,1,1)[7]")
+summary.of3 <- data.frame(model.of3, aic.of3, sigs.of3)
+summary.of3
+```
+ARIMA(1,1,1)(1,1,1)[7] lambda 1.3535 is the best model
+
+```{r}
+model.fix3 <- Arima(train3, order = c(1,1,1), seasonal = list(order = c(1,1,1), period = 7),lambda = lambda3)
+```
+
+#### Diagnostik Sisaan
+```{r}
+sisaan3 <- residuals(model.fix3)
+ks.test(sisaan3, "pnorm")
+Box.test(sisaan3, type = "Ljung-Box")
+Box.test(sisaan3^2, type = "Ljung-Box")
+```
+aman
+#### Performa Model
+```{r}
+## train
+accuracy(model.fix3$fitted, train3) # 11.58 % MAPE
+
+## Test
+test3.f <- forecast::forecast(model.fix3, h = length(test3))
+accuracy(ts(test3.f$mean), ts(test3)) # 10.11 % MAPE
+```
+
+### SARIMA SUMMARY
+```{r}
+## metrics summary
+metrics <- rbind(accuracy(model.fix1$fitted, train1), accuracy(ts(test1.f$mean), ts(test1)),
+                 accuracy(model.fix2$fitted, train2), accuracy(ts(test2.f$mean), ts(test2)),
+                 accuracy(model.fix3$fitted, train3), accuracy(ts(test3.f$mean), ts(test3)))
+
+rownames(metrics) <- c("Train1", "Test1", "Train2", "Test2", "Train3", "Test3")
+
+metrics %>% as.data.frame %>%  select(RMSE,MAPE)
+```
+splitting pada skenario 1 dan 3 menunjukan hasil yang baik pada fitting model. Pada skenario 2 cenderung adanya overfitting.
+
+## SSA
+### Skenario 1
+```{r}
+ssa1 <- ssa(train1, L = 35)
+plot(ssa1, type = "vectors")
+plot(ssa1, type = "series", groups = 1:10)
+plot(ssa1, type = "wcor")
+plot(ssa1,type="paired")
+
+g = list(c(1,2,5), c(3,4))
+
+wcor(ssa1, groups = g) %>% plot()
+```
+
+#### Reconstruction
+```{r}
+recon1 <- reconstruct(ssa1, groups = g)
+plot(recon1)
+## 1 dan 5 ## 3 dan 4 ## 9 dan 10
+
+build1 <- build_c(recon1,2)
+accuracy(build1, train1)
+```
+#### RForecast
+```{r}
+ssa.f1 <- rforecast(ssa1, len = length(test1),groups = g)
+build.f1 <- build_c(ssa.f1,2)
+
+accuracy(ts(build.f1), ts(test1))
+```
+### Skenario 2
+```{r}
+ssa2 <- ssa(train2, L = 35)
+plot(ssa2, type = "vectors")
+plot(ssa2, type = "series", groups = 1:10)
+
+g2 <- list(c(1,2,5), c(3,4))
+
+recon2 <- reconstruct(ssa2, groups = g2)
+plot(recon2)
+
+wcor(ssa2, groups = g2) %>% plot()
+```
+#### Reconstruction
+```{r}
+build2 <- build_c(recon2,2)
+plot(build2)
+
+accuracy(build2, train2)
+```
+#### RForecast
+```{r}
+ssa.f2 <- rforecast(ssa2, len = length(test2),groups = g2)
+build.f2 <- build_c(ssa.f2,2)
+
+accuracy(ts(build.f2), ts(test2))
+```
+
+### Skenario 3
+```{r}
+ssa3 <- ssa(train3, L = 35)
+plot(ssa3, type = "vectors")
+plot(ssa3, type = "series", groups = 1:10)
+
+g3 <- list(c(1,2,5), c(3,4))
+recon3 <- reconstruct(ssa3, groups = g3)
+plot(recon3)
+```
+
+#### Reconstruction
+```{r}
+build3 <- build_c(recon3,2)
+plot(build3)
+accuracy(build3, train3)
+```
+#### Rforecast
+```{r}
+ssa.f3 <- rforecast(ssa3, len = length(test3),groups = g3)
+build.f3 <- build_c(ssa.f3,2)
+
+accuracy(ts(build.f3), ts(test3))
+```
+### SSA SUMMARY
+```{r}
+## metrics summary
+metrics.ssa <- rbind(accuracy(build1, train1), accuracy(ts(build.f1), ts(test1)),
+                 accuracy(build2, train2), accuracy(ts(build.f2), ts(test2)),
+                 accuracy(build3, train3), accuracy(ts(build.f3), ts(test3)))
+
+rownames(metrics.ssa) <- c("Train1", "Test1", "Train2", "Test2", "Train3", "Test3")
+
+metrics.ssa <- metrics.ssa %>% as.data.frame %>%  select(RMSE,MAPE)
+
+metrics.ssa
+```
+
+## Forecasting 120 hari kedepan dengan skenario 3
+```{r}
+final.forecast.sarima <- forecast::forecast(model.fix3, h = 120+29)
+final.forecast.ssa <- rforecast(ssa3, len = 120+29,groups = g3)
+```
+
+```{r}
+ggplot()+
+  geom_line(aes(x=1:length(dt.ts), y=dt.ts), color="blue")+
+  geom_rect(aes(xmin = length(train3), xmax = length(dt.ts), ymin = 0, ymax = max(dt.ts), colour = "darkgrey"),alpha=1)+
+  geom_line(aes(x=(1:length(final.forecast.sarima$mean)+length(dt.ts)), y=final.forecast.sarima$mean), color="red")+
+  geom_line(aes(x=(1:length(final.forecast.sarima$mean)+length(dt.ts)), y=build_c(final.forecast.ssa,2)), color="green")
+  
+```
+

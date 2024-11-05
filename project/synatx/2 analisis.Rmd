@@ -1,0 +1,273 @@
+---
+title: "Analisis Awal"
+author: "Indra Mahib Z. R"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+## Library
+```{r, warning=FALSE, message=FALSE}
+library(TSA)
+library(dplyr)
+library(ggplot2)
+library(tseries) ## adf.test
+library(MASS) ## boxcox
+library(forecast)
+library(lmtest)
+```
+
+## Load Data
+Data yang digunakan merupakan data yang berasal dari SIASATI (Sistem Informasi Angkutan dan Saruna Transportasi Indonesia) yang berisi data jumlah penumpang pesawat berangkat dari bandara BPN.
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\data\\dt_BPN_impute.csv")
+head(dt)
+```
+### Preprocessing Data
+```{r}
+names(dt) <- c("tanggal","penumpang")
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+summary(dt)
+```
+Data yang diperoleh pada periode 1 Januari 2023 hingga 31 September 2024
+
+## Data Keseluruhan
+### Visualisasi Data
+```{r}
+ggplot(dt, aes(x = tanggal, y = penumpang)) +
+  geom_line() +
+  labs(title = "Jumlah Penumpang Pesawat Berangkat dari Bandara BPN",
+       x = "Tanggal",
+       y = "Jumlah Penumpang") +
+  theme_minimal()+
+  geom_line(aes(y = mean(penumpang)),col="darkred")
+```
+Terlihat pola yang cenderung seasonal namun dengan variasi yang tinggi menghasilkan pola data yang sangat fluktuatif dan cenderung tidak stasioner baik dalam rataan dan ragam.
+
+### ACF, PACF, EACF
+```{r}
+acf(dt$penumpang, main = "ACF",lag.max=30)
+pacf(dt$penumpang, main = "PACF",lag.max=30)
+eacf(dt$penumpang)
+```
+
+- Plot ACF jika dipandang cutoff maka terjadi cutoff setelah lag 14. Ini merupakan lag yang cukup tinggi. 
+
+- Plot PACF menunjukan PAC yang signifkan pada lag 1,2,3,7,8,14,15, 27, 28 hal, mengindikasikan adanya pola musiman pada data time series yang kita miliki.
+
+- Cek stasioneritas terlebih dahulu
+
+### Cek Stasioner dalam Rataan
+Untuk mengecek kestasioneran dari rataan kita dapat melihat secara eksploratif dan melakukan Uji Dickey-Fuller.
+
+- $H_0$ : Deret waktu tidak stasioner dalam rataan
+- $H_1$ : Deret waktu stasioner dalam rataan
+
+
+```{r}
+adf.test(dt$penumpang)
+```
+Hasil pengujian menunjukan data yang cenderung stasioner dalam rataan. Namun pada eksplorasi hal ini tidak begitu terlihat.
+
+### Cek Stasioner dalam Ragam
+Untuk mengecek kestasioneran dari ragam kita dapat menggunakan box-cox.
+
+```{r}
+index1 <- c(1:dim(dt)[1])
+bc1 <- boxcox(penumpang~index1, data = dt)
+lambda1 <- bc1$x[which.max(bc1$y)]
+lambda1
+
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% min()
+bc1$x[bc1$y > max(bc1$y) - 1/2 * qchisq(0.95,1)] %>% max()
+```
+Terlihat selang kepercayaan boxcox yaitu **-0.22** hingga **0.26** dan tidak mengandung nilai 1. Yang berarti ragam dari data cenderung tidak stasioner.
+
+## Transformasi
+Nilai lambda yang diperoleh dari boxcox adalah 0.02. Kita akan melakukan transformasi dengan tranformasi logaritma natural.
+
+```{r}
+dt.ts <- ts(dt$penumpang)
+dt.ts.log <- log(dt.ts)
+
+bc.tf <- boxcox(penumpang~1, data = dt)
+bc.tf$x[which.max(bc.tf$y)]
+
+par(mfrow=c(1,2))
+plot(dt.ts)
+plot(dt.ts.log)
+
+boxcox(dt.ts.log~index1,lambda= seq(-3,5,0.1))
+```
+
+
+Boxcox sudah memuat angka 1. Sehingga cenderung stasioner dalam ragam.
+
+```{r}
+adf.test(dt.ts.log)
+```
+
+### ACF PACF dan EACF
+```{r}
+acf(dt.ts.log, main = "ACF",lag.max=30)
+pacf(dt.ts.log,main="PACF",lag.max=30)
+```
+
+### coba diff
+```{r}
+dt.ts.diff <- diff(dt.ts)
+plot(dt.ts.diff)
+
+index2 <- 1:length(dt.ts.diff)
+
+boxcox(dt.ts.diff+7000~index2,lambda= seq(0,2,0.1))
+```
+
+Memuat satu setelah di differencing.
+
+```{r}
+acf(dt.ts.diff, main = "ACF",lag.max=30)
+pacf(dt.ts.diff,main="PACF",lag.max=30)
+```
+adanyaa pola seasonal 
+
+## Pemodelan ARIMA dan SARIMA
+```{r}
+dt.ts <- ts(dt$penumpang)
+fit.auto <- auto.arima(dt.ts)
+fit.auto
+```
+### ARMA(1,1)
+```{r}
+fit.arma11 <- arima(dt.ts, order = c(1,0,1))
+fit.arma11
+coeftest(fit.arma11)
+```
+### ARMA(2,1)
+```{r}
+fit.arma21 <- arima(dt.ts, order = c(2,0,1))
+fit.arma21
+coeftest(fit.arma21)
+```
+### ARMA (1,2)
+```{r}
+fit.arma12 <- arima(dt.ts, order = c(1,0,2))
+fit.arma12
+coeftest(fit.arma12)
+```
+### SARIMA(0,0,0)(2,0,0)[7]
+```{r}
+fit.sarima <- Arima(dt.ts, order = c(0,0,0), seasonal = list(order = c(2,0,0), period = 7))
+fit.sarima
+coeftest(fit.sarima)
+```
+### Pemilihan Model Terbaik
+```{r}
+list.model <- c("ARMA(1,1)","ARMA(2,1)","ARMA(1,2)","SARIMA(0,0,0)(2,0,0)[7]")
+list.aic <- c(fit.arma11$aic,fit.arma21$aic,fit.arma12$aic,fit.sarima$aic)
+list.bic <- c(fit.arma11$bic,fit.arma21$bic,fit.arma12$bic,fit.sarima$bic)
+
+data.frame(list.model,list.aic,list.bic)
+```
+Dari hasil pemodelan terlihat bahwa model terbaik adalah SARIMA(0,0,0)(2,0,0)[7] dengan nilai AIC dan BIC yang paling kecil.
+
+### Overfitting
+```{r}
+fit.sarima2 <- Arima(dt.ts, order = c(1,0,0), seasonal = list(order = c(2,0,0), period = 7))
+fit.sarima2
+coeftest(fit.sarima2)
+```
+```{r}
+fit.sarima3 <- Arima(dt.ts, order = c(0,0,1), seasonal = list(order = c(2,0,0), period = 7))
+fit.sarima3
+coeftest(fit.sarima3)
+```
+```{r}
+fit.sarima4 <- Arima(dt.ts, order = c(0,0,0), seasonal = list(order = c(3,0,0), period = 7))
+fit.sarima4
+coeftest(fit.sarima4)
+```
+```{r}
+fit.sarima5 <- Arima(dt.ts, order = c(0,0,0), seasonal = list(order = c(2,0,1), period = 7))
+fit.sarima5
+coeftest(fit.sarima5)
+```
+### Perbandingan Overfitting
+```{r}
+list.model2 <- c("SARIMA(0,0,0)(2,0,0)[7]","SARIMA(1,0,0)(2,0,0)[7]","SARIMA(0,0,1)(2,0,0)[7]","SARIMA(0,0,0)(3,0,0)[7]","SARIMA(0,0,0)(2,0,1)[7]")
+list.aic2 <- c(fit.sarima$aic,fit.sarima2$aic,fit.sarima3$aic,fit.sarima4$aic,fit.sarima5$aic)
+list.bic2 <- c(fit.sarima$bic,fit.sarima2$bic,fit.sarima3$bic,fit.sarima4$bic,fit.sarima5$bic)
+
+data.frame(list.model2,list.aic2,list.bic2)
+```
+SARIMA(0,0,0)(3,0,0)[7] merupakan model terbaik karena memiliki nilai AIC dan BIC yang paling kecil.
+
+## Diagnosa Model
+
+### Modelling
+```{r}
+fit.sarima4
+```
+### Eksplorasi Sisaan
+```{r}
+sisaan.sarima <- fit.sarima4$residuals
+par(mfrow=c(2,2))
+qqnorm(sisaan.sarima)
+qqline(sisaan.sarima, col = "blue", lwd = 2)
+plot(c(1:length(sisaan.sarima)),sisaan.sarima)
+acf(sisaan.sarima)
+pacf(sisaan.sarima)
+par(mfrow = c(1,1))
+```
+### Uji Formal
+```{r}
+ks.test(sisaan.sarima,"pnorm") 
+```
+tolak H0 sehingga sisaan tidak normal
+
+
+```{r}
+#2) Sisaan saling bebas/tidak ada autokorelasi
+Box.test(sisaan.sarima, type = "Ljung") 
+#tak tolak H0 > sisaan saling bebas
+```
+Sisaan tidak saling bebas
+
+```{r}
+#3) Sisaan homogen
+Box.test((sisaan.sarima)^2, type = "Ljung") 
+#tak tolak H0 > sisaan homogen
+```
+Ragam Homogen
+
+```{r}
+#4) Nilai tengah sisaan sama dengan nol
+t.test(sisaan.sarima, mu = 0, conf.level = 0.95) 
+#tak tolak h0 > nilai tengah sisaan sama dengan 0
+```
+Nilai tengah sisaan sama dengan 0
+
+### Kesimpulan
+
+Model terbaik adalah model SAR (3,0,0)[7] namun tidak memenuhi asumsi sisaan menyebar normal.  Namun asumsi ini dapat kita abaikan karena data yang kita miliki cukup banyak. 
+
+## Forecasting
+Karena model yang kita miliki sudah sesuai, kita dapat melakukan forecasting.
+```{r}
+hasil.forecast <- forecast(fit.sarima4,h=30)
+hasil.forecast
+```
+```{r}
+plot(hasil.forecast)
+```
+
+```{r}
+ts.plot(dt.ts,hasil.forecast$mean, col = c("black","red"), lty = c(1,2))
+```
+
+
+
+Data hasil prediksi yang kita memperoleh mampu mengankap pola dari data latih yang diguanakan.
+
+
+

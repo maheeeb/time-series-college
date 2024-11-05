@@ -1,0 +1,338 @@
+---
+title: "sarima-garch"
+author: "Indra Mahib Zuhair Riyanto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r }
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+library(FinTS)
+library(fGarch)
+library(rugarch)
+```
+
+## Data
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\project\\5 data\\2023-2024.csv")
+head(dt)
+tail(dt)
+```
+### Check Missing Date
+```{r}
+date.range <- seq(min(dt$tanggal), max(dt$tanggal), by = "day")
+missing.date <- date.range[!date.range %in% dt$tanggal]
+missing.date
+```
+```{r}
+dt1 <- left_join (data.frame(date.range), dt, by = c("date.range"="tanggal"))
+summary(dt1)
+
+median.brgkt = median(dt1$brgkt, na.rm = TRUE)
+median.tiba = median(dt1$tiba, na.rm = TRUE)
+
+dt2 <- dt1 %>% mutate(brgkt = ifelse(is.na(brgkt), median.brgkt + round(runif(1,-100,100)), brgkt),
+                      tiba = ifelse(is.na(tiba), median.tiba+round(runif(1,-100,100)), tiba))
+
+dt2$passenger <- dt2$brgkt + dt2$tiba
+summary(dt2)
+
+dt2 <- dt2 %>% select(-X)
+
+#write.csv(dt2, "D:\\IPB\\5\\MPDW\\project\\5 data\\2023-2024-fixed.csv", row.names = FALSE)
+```
+
+
+### Formatting
+
+```{r}
+dt <- dt2
+names(dt)[1] <- 'tanggal'
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+```
+
+## Eksplorasi
+```{r}
+ggplot(dt, aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+```
+
+
+```{r}
+dt.ts <- ts((dt$passenger))
+plot((dt.ts))
+```
+
+### Train Test Split
+```{r}
+train.ts <- dt.ts[1:(round(length(dt.ts)*0.90)+3)] %>% ts()
+test.ts <- dt.ts[((round(length(dt.ts)*0.90)+4)):length(dt.ts)] %>% ts()
+
+## plot data train and test
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)+length(train.ts)), y=test.ts), color="red")
+```
+train test split process sudah sesuai.
+
+## Eksplorasi Train Data
+
+```{r}
+acf(train.ts)
+```
+data yang kita miliki memiliki acf yang very slowly tails off mengindikasikan data yang tidak stasioner.
+
+```{r}
+adf.test(train.ts)
+```
+Hasil adf.test menunjukan tolak H0 yang artinya data sudah stasioner. Walaupun begitu, kita akan tetap menganggap data tidak staisoner dalam rataan
+
+```{r}
+index.train <- 1:length(train.ts)
+bc.train.ts <- boxcox(train.ts - (min(train.ts)-1) ~ index.train, lambda = seq(-2, 2, 0.1))
+```
+
+Boxcox  mengandung nilai 1 tidak perlu di transformasi
+
+
+```{r}
+acf(train.ts)
+```
+
+
+### Differencing
+
+```{r}
+train.diff1 <- diff(train.ts,lag=1)
+plot(train.diff1)
+```
+
+hasil differencing menunjukan data yang kita miliki sudah stasioner dalam rataan.
+
+```{r}
+adf.test(train.diff1)
+```
+Sudah stasioner dalam rataan.
+
+```{r}
+index.train.diff1 <- 1:length(train.diff1)
+bc.train.diff1 <- boxcox(train.diff1 - (min(train.diff1)-1) ~ index.train.diff1, lambda = seq(-2, 2, 0.1))
+```
+
+
+Boxcox mengandung angka 1 sehingga sudah tidak memerlukan transformasi.
+
+```{r}
+acf(train.diff1,lag.max=70)
+```
+
+
+
+ACF pada kelipatan 7 cenderung slowly tails off. kita lakukan differeincing lag 7
+
+```{r}
+train.diff2 <- diff(train.diff1,lag=7)
+plot(train.diff2)
+```
+
+```{r}
+acf(train.diff2,lag.max=50)
+```
+
+```{r}
+pacf(train.diff2,lag.max=80)
+```
+
+```{r}
+index.diff2 <- 1:length(train.diff2)
+bc.tain.diff2 <- boxcox(train.diff2 - (min(train.diff2)-1) ~ index.diff2, lambda = seq(-2, 2, 0.01))
+```
+
+tidak mengandung 1 sehingga perlu transformasi
+
+```{r}
+train.diff3 <- diff(train.diff2,7)
+plot(train.diff3)
+```
+
+
+
+## Identifikasi Model
+```{r}
+acf(train.diff2,lag.max = 65)
+pacf(train.diff2,lag.max=50)
+eacf(train.diff2)
+```
+
+
+```{r}
+auto.arima(train.diff2)
+```
+
+ARIMA(0,1,2)(0,1,0)7 
+ARIMA(0,1,2)(0,1,1)7 
+ARIMA(3,1,0)(0,1,1)7 
+ARIMA(3,1,2)(0,1,1)7
+ARIMA(4,1,1)(0,1,1)7 
+
+```{r}
+model1 <- Arima(train.ts, order = c(0,1,2), seasonal = list(order = c(0,1,0), period = 7))
+summary(model1)
+lmtest::coeftest(model1)
+```
+```{r}
+model2 <- Arima(train.ts, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7))
+summary(model2)
+lmtest::coeftest(model2)
+```
+
+```{r}
+model3 <- Arima(train.ts, order = c(3,1,0), seasonal = list(order = c(0,1,1), period = 7))
+summary(model3)
+lmtest::coeftest(model3)
+```
+
+```{r}
+model4 <- Arima(train.ts, order = c(3,1,2), seasonal = list(order = c(0,1,1), period = 7))
+summary(model4)
+lmtest::coeftest(model4)
+```
+```{r}
+model5 <- Arima(train.ts, order = c(4,1,1), seasonal = list(order = c(0,1,1), period = 7))
+summary(model5)
+lmtest::coeftest(model5)
+
+```
+
+terbaik model 2
+ARIMA(1,1,1)(0,2,1)7
+
+### Overfitting
+
+```{r}
+model6 <- Arima(train.ts, order = c(1,1,2), seasonal = list(order = c(0,1,1), period = 7))
+summary(model6)
+lmtest::coeftest(model6)
+```
+```{r}
+model7 <- Arima(train.ts, order = c(0,1,3), seasonal = list(order = c(0,1,1), period = 7))
+summary(model7)
+lmtest::coeftest(model7)
+```
+```{r}
+model8 <- Arima(train.ts, order = c(0,1,2), seasonal = list(order = c(1,1,1), period = 7))
+summary(model8)
+lmtest::coeftest(model8)
+```
+```{r}
+model9 <- Arima(train.ts, order = c(0,1,2), seasonal = list(order = c(0,1,2), period = 7))
+summary(model9)
+lmtest::coeftest(model9)
+```
+
+```{r}
+model10 <- Arima(train.ts, order = c(1,1,1), seasonal = list(order = c(0,2,2), period = 7))
+summary(model10)
+lmtest::coeftest(model10)
+```
+model 2
+012 011 7
+
+## Diagnostik sisaan
+
+```{r}
+sisaan <- model2$residuals
+qqnorm(sisaan)
+qqline(sisaan, col = "blue", lwd = 2)
+plot(c(1:length(sisaan)),sisaan,type='l')
+acf(sisaan)
+pacf(sisaan)
+```
+
+```{r}
+shapiro.test(sisaan)
+```
+
+
+```{r}
+Box.test(sisaan, type = "Ljung-Box")
+```
+```{r}
+Box.test(sisaan^2, type = "Ljung-Box")
+```
+### Uji Efek ARCH LM
+```{r}
+for(i in seq(1,20,1)){
+  cat("Lags: ",i,"\n")
+  print(ArchTest(sisaan, lags = i)$p.value)
+}
+```
+
+## GARCH
+```{r}
+lebaran <- ifelse(dt$r2023 | dt$r2024,1,0)
+
+spec <- ugarchspec(mean.model = list(armaOrder = c(0, 0)),
+                   variance.model = list(model = "sGARCH", garchOrder = c(1, 1),external.regressors = matrix(lebaran[1:578])),distribution.model = "norm")
+
+fit11 <- ugarchfit(spec, data = sisaan)
+plot(fit11,which=1)
+fit11@fit$fitted.values
+
+eps_train <- rnorm(length(train.ts),0,1)
+epsilon_train <- fit11@fit$sigma * scale(model2$residuals)
+
+shapiro.test(eps_train)
+Box.test(eps_train, type = "Ljung-Box")
+Box.test(eps_train^2, type = "Ljung-Box")
+
+accuracy(model2$fitted, train.ts)
+accuracy(model2$fitted+epsilon_train, train.ts)
+
+```
+
+```{r}
+forecast.sarima <- forecast::forecast(model2, h = length(test.ts))
+plot(forecast.sarima)
+
+accuracy(ts(forecast.sarima$mean), ts(test.ts))
+```
+
+```{r}
+
+forecast.garch <- ugarchforecast(fit11, n.ahead = length(test.ts))
+
+sigma.forecast <- sigma(forecast.garch)
+plot(sigma.forecast)
+set.seed(31)
+eps_test <- rdist(distribution = "norm", length(test.ts), mu = 0, sigma = 1)
+epsilon_test <- sigma.forecast 
+plot(epsilon_test)
+
+accuracy(ts(forecast.sarima$mean +epsilon_test), ts(test.ts))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

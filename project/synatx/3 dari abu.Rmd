@@ -1,0 +1,515 @@
+---
+title: "BPN TIBA"
+author: "Mahib"
+date: "2024-09-30"
+output: html_document
+---
+
+### Library yang digunakan
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+library(FinTS)
+library(fGarch)
+library(rugarch)
+```
+
+# Import data
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\data\\data_0101-3107_mpdw _csv.csv")
+head(dt)
+dim(dt)
+
+dt <- dt %>% filter(ID.Prasarana == "BPN") %>% dplyr::select(Tanggal, Penumpang.Tiba)
+
+dim(dt)
+names(dt) <- c("tanggal", "penumpang.tiba")
+
+#write.csv(dt, "D:\\IPB\\5\\MPDW\\data\\data_bpn_tiba.csv", row.names = FALSE)
+```
+
+```{r}
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+str(dt)
+```
+
+## Pembagian data
+Data dibagi menjadi 3 (data full, Train, test)
+
+```{r}
+dt %>% filter(penumpang.tiba == 0) %>% dim() ## 5 data nilainya 0
+
+### impute data backfill
+dt %>% mutate(penumpang.tiba = ifelse(penumpang.tiba == 0, median(penumpang.tiba), penumpang.tiba)) -> dt
+
+write.csv(dt, "D:\\IPB\\5\\MPDW\\data\\data_bpn_tiba.csv", row.names = FALSE)
+
+dt.ts <- ts(dt$penumpang.tiba)
+plot(dt.ts)
+```
+
+```{r}
+train.ts <- dt.ts[1:round(0.8*length(dt.ts))]  %>% ts()
+test.ts <- dt.ts[(round(0.8*length(dt.ts))+1):length(dt.ts)] %>% ts()
+
+### plot
+plot.full <- ggplot(dt, aes(x = tanggal, y = penumpang.tiba)) +
+  geom_line() + 
+  geom_line(data = dt %>% filter(tanggal %in% dt$tanggal[1:round(0.8*length(dt.ts))]), color = "red") +
+  theme_bw() +
+  xlab("Tanggal") +
+  ylab("Penumpang Tiba") +
+  ggtitle("Time Series Plot of Penumpang Tiba")
+plot.full
+```
+Merah  data train , hitam  data test. Proses split sudah sesuai.
+
+## Eksplorasi data full
+```{r}
+plot(train.ts)
+```
+
+Dari plot time series terlihat bahwa data yang kita hadapi cenderung tidak stasioner dalam rataan dan dalam ragam.
+
+```{r}
+index <- 1:length(train.ts)
+bc <- boxcox(train.ts~index, lambda = seq(-2,5,by=0.01))
+```
+tidak stasioner dalam ragam
+setelah di transformasi boxcox data menjadi stasioner dalam ragam
+
+1.27 adalah nilai lambda yang terbaik
+
+```{r}
+train.ts.tf <- (train.ts)^(bc$x[which.max(bc$y)])
+plot(train.ts.tf)
+boxcox(train.ts.tf~index, lambda = seq(-2,5,by=0.01))
+```
+```{r}
+adf.test(train.ts, alternative = "stationary")
+```
+tidak stasioner dalam rataan
+
+
+### ACF PACF
+
+```{r}
+acf(train.ts)
+```
+
+ACF data menunjukan slowly tails off. baik pada biasa dan pada musiman.
+
+```{r}
+pacf(train.ts)
+```
+
+ACF Slowly tailfs off
+
+```{r}
+seasonplot(train.ts,30,main="Kalimantan Plane Passenger", ylab="Plane Passenger (person)", col=rainbow(18))
+```
+
+
+```{r}
+adf.test(diff(train.ts,7), alternative = "stationary")
+```
+
+
+```{r}
+### seasonal differencing
+train.diff1 <- diff(train.ts,lag=30)
+plot(train.diff1)
+```
+```{r}
+adf.test(train.diff1, alternative = "stationary")
+```
+```{r}
+index1 <- 1:length(train.diff1)
+boxcox(train.diff1-(min(train.diff1)-1)~index1, lambda = seq(-2,2,by=0.01))
+```
+
+
+```{r}
+acf(train.diff1)
+```
+
+
+```{r}
+pacf(train.diff1,lag.max=72)
+```
+
+
+
+```{r}
+eacf(train.diff1,ar.max=5,ma.max=5)
+```
+```{r}
+train.diff2 <- diff(train.diff1,lag=1)
+plot(train.diff2)
+```
+```{r}
+train.diff3 <- diff(train.diff2,lag=7)
+plot(train.diff3)
+```
+
+
+```{r}
+acf(train.diff2)
+```
+
+```{r}
+pacf(train.diff2)
+```
+
+```{r}
+eacf(train.diff2,ar.max=5,ma.max=5)
+```
+
+
+kemungkinan model 
+
+1.arima(0,1,4) (0,1,2)7
+1.arima(0,1,1) (0,1,2)7
+2.arima(3,1,0) (0,1,2)7
+3 arima(3,1,1) (0,1,2)7
+4 arima(2,1,4)(0,1,2)7
+
+
+```{r}
+model1 <- Arima(train.ts,order=c(0,1,4),seasonal=list(order=c(0,1,2),period=7))
+summary(model1)
+lmtest::coeftest(model1)
+```
+
+
+```{r}
+model2 <- Arima(train.ts,order=c(0,1,1),seasonal=list(order=c(0,1,2),period=7))
+summary(model2)
+lmtest::coeftest(model2)
+```
+
+```{r}
+model3 <- Arima(train.ts,order=c(3,1,0),seasonal=list(order=c(0,1,2),period=7))
+summary(model3)
+lmtest::coeftest(model3)
+```
+
+```{r}
+model4 <- Arima(train.ts,order=c(2,1,4),seasonal=list(order=c(0,1,2),period=7))
+summary(model4)
+lmtest::coeftest(model4)
+```
+
+
+
+```{r}
+model5 <- Arima(train.ts,order=c(3,1,0),seasonal=list(order=c(0,1,1),period=7))
+summary(model5)
+lmtest::coeftest(model5)
+```
+model 5 memberikan hasil terbaik
+
+# overfitting
+naikin seasonal
+```{r}
+model6 <- Arima(train.ts,order=c(0,1,2),seasonal=list(order=c(1,0,1),period=7))
+summary(model6)
+lmtest::coeftest(model6)
+```
+
+```{r}
+model7 <- Arima(train.ts,order=c(0,1,2),seasonal=list(order=c(2,0,0),period=7))
+summary(model7)
+lmtest::coeftest(model7)
+```
+
+naikin biasa
+```{r}
+model8 <- Arima(train.ts,order=c(1,1,2),seasonal=list(order=c(1,0,0),period=7))
+     summary(model8)
+     lmtest::coeftest(model8)
+```
+
+```{r}
+model9 <- Arima(train.ts,order=c(0,1,3),seasonal=list(order=c(1,0,0),period=7))
+     summary(model9)
+     lmtest::coeftest(model9)
+```
+model 6 terbaik.
+
+```{r}
+#Eksplorasi
+sisaan <- model5$residuals
+par(mfrow=c(2,2))
+qqnorm(sisaan)
+qqline(sisaan, col = "blue", lwd = 2)
+plot(c(1:length(sisaan)),sisaan)
+acf(sisaan)
+pacf(sisaan)
+par(mfrow = c(1,1))
+```
+#### Uji Formal
+
+```{r}
+#1) Sisaan Menyebar Normal
+ks.test(sisaan,"pnorm") 
+shapiro.test(sisaan)
+#tak tolak H0 > sisaan menyebar normal
+```
+
+$H_0$ : Sisaan menyebar normal
+
+$H_1$ : Sisaan tidak menyebar normal
+
+Berdasarkan uji KS tersebut, didapat *p-value* yang lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa sisaan tidak menyebar normal. 
+
+```{r}
+#2) Sisaan saling bebas/tidak ada autokorelasi
+Box.test(sisaan, type = "Ljung") 
+#tak tolak H0 > sisaan saling bebas
+```
+
+Selanjutnya akan dilakukan uji formal untuk kebebasan sisaan menggunakan uji Ljung-Box. Hipotesis yang digunakan adalah sebagai berikut.
+
+$H_0$ : Sisaan saling bebas
+
+$H_1$ : Sisaan tidak tidak saling bebas
+
+Berdasarkan uji Ljung-Box tersebut, didapat *p-value* sebesar 0.4343 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa sisaan saling bebas. 
+
+```{r}
+#3) Sisaan homogen
+Box.test((sisaan)^2, type = "Ljung") 
+#tak tolak H0 > sisaan homogen
+```
+
+Hipotesis yang digunakan untuk uji kehomogenan ragam adalah sebagai berikut.
+
+$H_0$ : Ragam sisaan homogen
+
+$H_1$ : Ragam sisaan tidak homogen
+
+Berdasarkan uji Ljung-Box terhadap sisaan kuadrat tersebut, didapat *p-value* yang lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa ragam sisaan tidak homogen. Hal ini berbeda dengan eksplorasi.
+
+### Diagnostik Error
+
+```{r}
+plot(sisaan,type="l")
+## ragam cenderung tidak homogen
+```
+
+
+## Uji ARCH-LM
+```{r}
+for(i in seq(2,24,2)){
+  cat("Lags: ",i,"\n")
+  print(ArchTest(sisaan, lags = i)$p.value)
+}
+```
+
+```{r}
+# minmax <- function(x) (x - min(x))/(max(x) - min(x))
+# 
+# sisaan <- minmax(sisaan)
+# write.csv((sisaan), "D:\\IPB\\5\\MPDW\\data\\sisaan_bpn_tiba.csv", row.names = FALSE)
+```
+
+### GARCH
+
+```{r}
+res.arima211 <- model5$residuals
+garch01=garch(x=res.arima211,order=c(0,1))
+AIC(garch01)
+lmtest::coeftest(garch01)
+garch02=garch(x=res.arima211,order=c(0,2))
+AIC(garch02)
+lmtest::coeftest(garch02)
+garch03=garch(x=res.arima211,order=c(0,3))
+AIC(garch03)
+lmtest::coeftest(garch03)
+garch04=garch(x=res.arima211,order=c(0,4))
+AIC(garch04)
+lmtest::coeftest(garch04)
+garch05=garch(x=res.arima211,order=c(0,5))
+AIC(garch05)
+lmtest::coeftest(garch05)
+garch06=garch(x=res.arima211,order=c(0,6))
+AIC(garch06)
+garch07=garch(x=res.arima211,order=c(0,7))
+AIC(garch07)
+lmtest::coeftest(garch07)
+garch08=garch(x=res.arima211,order=c(0,8))
+AIC(garch08)
+garch09=garch(x=res.arima211,order=c(0,9))
+AIC(garch09)
+garch10=garch(x=res.arima211,order=c(0,10))
+AIC(garch10)
+lmtest::coeftest(garch10)
+garch11=garch(x=res.arima211,order=c(1,1))
+AIC(garch11)
+lmtest::coeftest(garch11)
+garch12=garch(x=res.arima211,order=c(1,2))
+AIC(garch12)
+lmtest::coeftest(garch12)
+garch13=garch(x=res.arima211,order=c(1,3))
+AIC(garch13)
+lmtest::coeftest(garch13)
+```
+```{r}
+logLik(garch01)
+logLik(model5)
+```
+
+```{r}
+cv.garch01=garch01$fit[,1]^2
+plot(cv.garch01)
+length(cv.garch01)
+```
+
+```{r}
+
+argar.res = garch11$residuals
+
+## std residuals
+# std.residuals <- model5$residuals/sd(model5$residuals)
+# plot(std.residuals,type="l")
+
+# write.csv(std.residuals, "D:\\IPB\\5\\MPDW\\data\\std_res_bpn_tiba.csv", row.names = FALSE)
+```
+
+```{r}
+scale(train.ts)
+hasil.hybrid <- scale(train.ts) + argar.res
+
+
+## reverse the scale(train.ts) process
+hasil.hybrid <- hasil.hybrid * sd(train.ts) + mean(train.ts)
+
+plot(hasil.hybrid,type="l")
+plot(model5$fitted)
+
+```
+### Diagnostik pt2
+
+```{r}
+
+ggplot()+
+  geom_line(data = train.ts, aes(x = time(train.ts), y = train.ts), color = "blue") +
+  geom_line(data = hasil.hybrid, aes(x = time(hasil.hybrid), y = hasil.hybrid), color = "red") 
+
+error_after_garch <- train.ts - hasil.hybrid
+
+plot(error_after_garch,type="l")
+
+length(train.ts)
+length(hasil.hybrid)
+hasilargar2 <- scale(model5$fitted) + argar.res
+hasilargar2 <- hasilargar2 * sd(train.ts) + mean(train.ts)
+accuracy(train.ts,hasilargar2)
+
+error_after_garch <- train.ts - hasilargar2
+
+```
+```{r}
+ks.test(error_after_garch,"pnorm")
+```
+
+```{r}
+shapiro.test(error_after_garch)
+```
+```{r}
+Box.test(error_after_garch, type = "Ljung") 
+```
+
+```{r}
+Box.test((error_after_garch)^2, type = "Ljung") 
+```
+```{r}
+acf(error_after_garch)
+```
+
+
+```{r}
+
+
+ggplot()+
+  geom_line(data = train.ts, aes(x = time(train.ts), y = train.ts), color = "blue") +
+  geom_line(data = hasilargar2, aes(x = time(hasilargar2), y = hasilargar2), color = "red") 
+
+```
+
+```{r}
+error_after_garch2 <- train.ts - hasilargar2
+```
+
+```{r}
+shapiro.test(error_after_garch2)
+```
+```{r}
+Box.test(error_after_garch2, type = "Ljung") 
+```
+```{r}
+Box.test((error_after_garch2)^2, type = "Ljung") 
+```
+### Prediction Performance
+```{r}
+forecast1 <- forecast(model5, h = length(test.ts))
+ramalan <- forecast1$mean %>% ts()
+length(forecast1$mean)
+length(test.ts)
+accuracy(ramalan,test.ts)
+
+ggplot()+
+  geom_line(data = test.ts, aes(x = time(test.ts), y = test.ts), color = "blue") +
+  geom_line(data = ramalan, aes(x = time(ramalan), y = ramalan), color = "red") 
+
+### forecast garch01
+fitgar <- garchFit(~garch(1,1), data = scale(model5$residuals), trace = F)
+forecast2 <- predict(fitgar, n.ahead = 114,trace=F)
+
+tail(forecast2)
+error_prd <- forecast2$meanError * sd(model5$residuals) + mean(model5$residuals)
+ramalan2 <- ramalan + error_prd
+
+length(ramalan)
+length(error_prd)
+
+ggplot()+
+  geom_line(data = test.ts, aes(x = time(test.ts), y = test.ts), color = "blue") +
+  geom_line(data = ramalan2, aes(x = time(ramalan2), y = ramalan2), color = "red") 
+
+accuracy(ramalan2,test.ts)
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

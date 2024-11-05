@@ -1,0 +1,514 @@
+---
+title: "sarimax - ardl stuff"
+author: "Indra Mahib Zuhair Riyanto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r }
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+```
+
+## Data
+
+```{r}
+dt <- read.csv("D:\\IPB\\5\\MPDW\\project\\5 data\\2209-2409.csv")
+head(dt)
+```
+
+### Data Selection
+```{r}
+dt <- dt %>% select(-X)
+# dt <- dt %>% filter(ID.Prasarana=="BPN") %>%
+#   select(Tanggal, Penumpang.Berangkat, Penumpang.Tiba) %>%
+#   rename(tanggal = Tanggal, brgkt = Penumpang.Berangkat, tiba = Penumpang.Tiba)
+# str(dt)
+
+```
+
+### Formatting
+
+```{r}
+dt$tanggal <- as.Date(dt$tanggal, format = "%Y-%m-%d")
+str(dt)
+dt1 <- dt %>% filter(tanggal >= "2022-09-30") 
+
+dt.range <- seq(min(dt1$tanggal), max(dt1$tanggal), by = 1)
+dt.range <- as.data.frame(dt.range)
+dt.range$dt.range[!dt.range$dt.range %in% dt1$tanggal] %>% length() #7
+
+dt2 <- left_join(dt.range, dt1, by = c("dt.range" = "tanggal"))
+summary(dt2)
+
+### Impute NA dengan median
+dt2$brgkt <- ifelse(is.na(dt2$brgkt), median(dt2$brgkt, na.rm = T), dt2$brgkt)
+dt2$tiba <- ifelse(is.na(dt2$tiba), median(dt2$tiba, na.rm = T), dt2$tiba)
+
+##Impute zero dengan median
+dt2$brgkt <- ifelse(dt2$brgkt==0, median(dt2$brgkt, na.rm = T), dt2$brgkt)
+dt2$tiba <- ifelse(dt2$tiba==0, median(dt2$tiba, na.rm = T), dt2$tiba)
+
+summary(dt2)
+
+```
+
+## Eksplorasi
+```{r}
+dt2$passenger <- dt2$brgkt + dt2$tiba
+names(dt2)[1] <- "tanggal"
+ggplot(dt2, aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+```
+
+Ada beberapa yang memiliki nilai 0. Perlu di telusuri mengapa hal ini terjadi.
+
+```{r}
+dt2 %>% filter(brgkt==0 | tiba==0)
+```
+terdapat 5 data yang memiliki nilai 0. Tidak ada berita yang mengidikasikan bandara ditutup pada tanggal yang bersangkutan. Maka, data ini dianggap sebagai data yang hilang dan perlu diimputasi.
+
+```{r}
+# Imputasi dengan Median
+#dt <- dt %>% mutate(brgkt = ifelse(brgkt==0, median(brgkt,na.rm=T), brgkt),
+                   # tiba = ifelse(tiba==0, median(tiba,na.rm=T), tiba))
+
+#Imputasi dengan average sebelum sesudah
+# for(i in 1:dim(dt)[1]){
+#   if(dt$brgkt[i]==0){
+#     dt$brgkt[i] <- (dt$brgkt[i-1] + dt$brgkt[i+1])/2
+#     dt$tiba[i] <- (dt$tiba[i-1] + dt$tiba[i+1])/2
+#   }
+# }
+
+## Plot untuk cek
+ggplot(dt, aes(tanggal, brgkt)) +
+  geom_line() +
+  geom_line(aes(tanggal, tiba), color = "red") 
+
+```
+
+Sudah aman.
+
+```{r}
+dt$passenger <- dt$brgkt + dt$tiba
+summary(dt)
+
+write.csv(dt, "D:\\IPB\\5\\MPDW\\data\\2022-2024")
+```
+
+```{r}
+dt = dt2
+ggplot(dt,aes(tanggal, passenger)) +
+  geom_line()
+```
+Data yang kita miliki memiliki fluktuasi yang cukup tinggi. Ini mengingingidikasikan data yang kita miliki tidak stasioner. Terdapat juga pola tahunan yang terjadi kemungkinan besar karena adanya libur besar seperti lebaran.
+
+### Eksplorasi 
+#### Liburan
+```{r}
+dt$libur <- ifelse(weekdays(dt$tanggal) %in% c("Saturday","Sunday"), 1, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$libur), color="blue")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+```
+
+#### Lebaran
+```{r}
+## dummy variabel for date in Wed, Mar 22, 2023 – Fri, Apr 21, 2023
+## Mar 11, 2024 – Tue, Apr 9, 2024
+ramadhan2023 <- seq(as.Date("2023-03-15"), as.Date("2023-04-28"), by = 1)
+ramadhan2024 <- seq(as.Date("2024-03-04"), as.Date("2024-04-16"), by = 1)
+
+## encode
+dt$r2023 <- ifelse(dt$tanggal %in% ramadhan2023, 10000, 0)
+dt$r2024 <- ifelse(dt$tanggal %in% ramadhan2024, 10000, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$r2023), color="blue")+
+  geom_point(aes(x=dt$tanggal, y=dt$r2024), color="green")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+
+```
+
+melakukan encoding terhadap bulan ramadhan 2023 dan 2024 seminggu sebelum dan seminggu sesudah
+
+## Encoding Idul Adha
+```{r}
+iduladha2023 <- seq(as.Date("2023-06-27"), as.Date("2023-06-30"), by = 1)
+iduladha2024 <- seq(as.Date("2024-06-15"), as.Date("2024-06-18"), by = 1)
+
+
+dt$i2023 <- ifelse(dt$tanggal %in% iduladha2023, 10000, 0)
+dt$i2024 <- ifelse(dt$tanggal %in% iduladha2024, 10000, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$i2023), color="blue")+
+  geom_point(aes(x=dt$tanggal, y=dt$i2024), color="green")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+
+```
+
+### encoding 17 agustus
+```{r}
+kemerdekaan2024 <- as.Date("2024-08-17")
+
+dt$kemerdekaan <- ifelse(dt$tanggal %in% kemerdekaan2024, 10000, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$kemerdekaan), color="blue")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+```
+
+## tahun baru islam
+```{r}
+baruislam <- as.Date(c("2024-07-07","2023-07-19"))
+
+dt$baruislam <- ifelse(dt$tanggal %in% baruislam, 10000, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$baruislam), color="blue")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+```
+
+```{r}
+cek <- as.Date(c("2024-07-17","2023-06-29"))
+
+dt$cek <- ifelse(dt$tanggal %in% cek, 10000, 0)
+
+ggplot()+
+  geom_point(aes(x=dt$tanggal, y=dt$cek), color="blue")+
+  geom_line(aes(x=dt$tanggal, y=dt$passenger), color="red")
+```
+
+##Trying Sarimax
+```{r}
+dt.ts <- ts((dt$passenger))
+```
+
+
+### Eksplorasi TS
+```{r}
+dt.ts <- ts((dt$passenger))
+plot((dt.ts))
+```
+
+### Train Test Split
+```{r}
+train.ts <- dt.ts[1:(round(length(dt.ts)*0.91))] %>% ts()
+test.ts <- dt.ts[((round(length(dt.ts)*0.91)+1)):length(dt.ts)] %>% ts()
+
+## plot data train and test
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=(1:length(test.ts)+length(train.ts)), y=test.ts), color="red")
+```
+train test split process sudah sesuai.
+
+## Eksplorasi Train Data
+
+```{r}
+acf(train.ts,lag.max=60)
+pacf(train.ts)
+```
+data yang kita miliki memiliki acf yang very slowly tails off mengindikasikan data yang tidak stasioner.
+
+```{r}
+adf.test(train.ts)
+```
+Hasil adf.test menunjukan tolak H0 yang artinya data sudah stasioner. Walaupun begitu, kita akan tetap menganggap data tidak staisoner dalam rataan
+
+```{r}
+index.train <- 1:length(train.ts)
+bc.train.ts <- boxcox((train.ts)  ~ index.train, lambda = seq(-2, 2, 0.1))
+```
+
+Boxcox tidak mengandung nilai 1 perlu di transformasi
+
+
+### Differencing
+
+```{r}
+train.diff1 <- diff((train.ts),lag=1)
+plot(train.diff1)
+```
+
+hasil differencing menunjukan data yang kita miliki sudah stasioner dalam rataan.
+
+```{r}
+adf.test(train.diff1)
+```
+Sudah stasioner dalam rataan.
+
+```{r}
+index.train.diff1 <- 1:length(train.diff1)
+bc.train.diff1 <- boxcox(train.diff1 - (min(train.diff1)-1) ~ index.train.diff1, lambda = seq(-2, 2, 0.1))
+```
+
+
+Boxcox mengandung angka 1 sehingga sudah tidak memerlukan transformasi.
+
+```{r}
+acf(train.diff1,lag.max=70)
+```
+```{r}
+pacf(train.diff1,lag.max=50)
+```
+
+
+ACF pada kelipatan 7 cenderung slowly tails off. kita lakukan differeincing lag 7
+
+```{r}
+train.diff2 <- diff(train.diff1,lag=7)
+plot(train.diff2)
+```
+
+```{r}
+acf(train.diff2,lag.max=50)
+```
+
+```{r}
+pacf(train.diff2,lag.max=50)
+```
+
+```{r}
+index.diff2 <- 1:length(train.diff2)
+bc.tain.diff2 <- boxcox(train.diff2 - (min(train.diff2)-1) ~ index.diff2, lambda = seq(-2, 2, 0.01))
+bc.tain.diff2$x[which(bc.tain.diff2$y==max(bc.tain.diff2$y))]
+```
+
+
+```{r}
+train.diff2.tf <- (train.diff2 - (min(train.diff2)-1))^1.2
+boxcox(train.diff2.tf ~ index.diff2, lambda = seq(-2, 2, 0.01))
+```
+
+
+```{r}
+write.csv(train.diff2,
+          "D:\\IPB\\5\\MPDW\\project\\diff2.csv")
+```
+
+
+
+## Identifikasi Model
+```{r}
+acf(train.diff2.tf,lag.max = 50)
+pacf(train.diff2.tf,lag.max=50)
+eacf(train.diff2.tf)
+```
+
+
+```{r}
+auto.arima(train.diff2.tf,seasonal=T)
+```
+
+ARIMA(1,1,1)(0,1,0)7 - auto arima all sig 8877
+ARIMA(0,1,2)(0,1,1)7 - assuming acf cutoff all 8563
+ARIMA(3,1,0)(0,1,1)7 - assuming pacf cutoff all 8578
+ARIMA(3,1,2)(0,1,1)7 - assuming pacf cutoff
+ARIMA(3,1,1)(0,1,1)7 - eacf 1
+ARIMA(1,1,3)(0,1,1)7 - eacf 2
+
+```{r}
+model1 <- Arima((train.diff2.tf), order = c(4,0,5), seasonal = list(order = c(0,0,0)))
+summary(model1)
+lmtest::coeftest(model1)
+```
+```{r}
+model2 <- Arima((train.diff2.tf), order = c(0,0,2), seasonal = list(order = c(0,0,1), period = 7))
+summary(model2)
+lmtest::coeftest(model2)
+```
+
+```{r}
+model3 <- Arima((train.ts), order = c(3,1,0), seasonal = list(order = c(0,1,1), period = 7),lambda = 1.22)
+summary(model3)
+lmtest::coeftest(model3)
+```
+
+```{r}
+model4 <- Arima((train.ts), order = c(3,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda=1.22)
+summary(model4)
+lmtest::coeftest(model4)
+```
+```{r}
+model5 <- Arima((train.ts), order = c(3,1,1), seasonal = list(order = c(0,1,1), period = 7),lambda=1.22)
+summary(model5)
+lmtest::coeftest(model5)
+```
+
+terbaik model 2
+ARIMA(0,1,2)(0,1,1)7 - assuming acf cutoff
+
+### Overfitting
+
+```{r}
+model6 <- Arima((train.diff2.tf), order = c(1,0,2), seasonal = list(order = c(0,0,1), period = 7))
+summary(model6)
+lmtest::coeftest(model6)
+```
+
+```{r}
+model7 <- Arima((train.diff2.tf), order = c(0,0,3), seasonal = list(order = c(0,0,1), period = 7))
+summary(model7)
+lmtest::coeftest(model7)
+```
+```{r}
+model8 <- Arima((train.diff2.tf), order = c(0,0,2), seasonal = list(order = c(0,0,2), period = 7))
+summary(model8)
+lmtest::coeftest(model8)
+```
+```{r}
+model9 <- Arima(log(train.ts), order = c(0,1,2), seasonal = list(order = c(1,1,1), period = 7))
+summary(model9)
+lmtest::coeftest(model9)
+```
+model 2 terbaik
+
+
+```{r}
+
+model_fix <- Arima((train.ts), order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = 1.2)
+
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=1:length(model_fix$fitted), y=(model_fix$fitted)), color="red")
+
+accuracy((model_fix$fitted),(train.ts))
+```
+
+
+### SSA
+```{r}
+library(Rssa)
+s = ssa(model_fix$residuals, L = 100)
+plot(s,type='vectors',groups = 1:10)
+plot(s,type='series',groups = 1:10)
+plot(s,type='paired')
+```
+
+```{r}
+r = reconstruct(s, groups = 1:10)
+plot(r)
+r123 <- r$F9 + r$F10
+plot(r123)
+```
+
+
+```{r}
+accuracy((model_fix$fitted),(train.ts))
+accuracy((model_fix$fitted+r123),train.ts)
+```
+```{r}
+sarima.predict <- forecast::forecast(model_fix,h=length(test.ts))
+plot(sarima.predict)
+accuracy(ts((sarima.predict$mean)),ts(test.ts))
+
+ssa.predict <- rforecast(s, groups = 1:3, len = length(test.ts))
+ssa.predict.res <-ssa.predict$F1 + ssa.predict$F2 + ssa.predict$F3
+plot(ssa.predict.res)
+hybrid.result <- (sarima.predict$mean+ ssa.predict.res)
+accuracy(ts(hybrid.result),ts(test.ts))
+
+```
+
+
+
+```{r}
+exog <- ifelse(dt$r2023 | dt$r2024,1,0)
+model2.x <- Arima(train.ts, order = c(0,1,2), seasonal = list(order = c(0,1,1), period = 7),lambda = 1.1515, xreg = r$F1[1:length(train.ts)])
+
+ggplot()+
+  geom_line(aes(x=1:length(train.ts), y=train.ts), color="blue")+
+  geom_line(aes(x=1:length(exog), y=exog*mean(train.ts)), color="red")
+
+summary(model2.x)
+lmtest::coeftest(model2.x)
+```
+
+## ARDL
+```{r}
+library(dLagM)
+y.ardl <- as.vector(train.ts)
+x.ardl <- as.vector(exog[1:length(train.ts)])
+data.ardl <- data.frame(y = y.ardl, x = x.ardl)
+ardl1 <- ardlDlm(y~x,data = data.ardl, p = 1, q = 1) 
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+
+ardl.f <- forecast(ardl1,
+                   x= exog[(length(train.ts)+1):length(dt.ts)],
+                   h = 37)
+```
+
+## Modelling Sisaan
+```{r}
+sisaan <- model_fix$residual
+acf(sisaan,lag.max = 50)
+sisaan.diff <- diff(sisaan,lag=1)
+sisaan.diff %>% plot()
+acf(sisaan.diff,lag.max = 50)
+pacf(sisaan.diff,lag.max = 50)
+each
+
+boxcox((sisaan.diff - min(sisaan.diff) + 1) ~ 1, lambda = seq(-2, 2, 0.1))
+adf.test(sisaan.diff)
+```
+
+
+## Diagnostik sisaan
+
+```{r}
+sisaan <- model_fix$residuals
+qqnorm(sisaan)
+qqline(sisaan, col = "blue", lwd = 2)
+plot(c(1:length(sisaan)),sisaan,type='l')
+acf(sisaan)
+pacf(sisaan)
+```
+
+```{r}
+shapiro.test(sisaan)
+```
+
+
+```{r}
+Box.test(sisaan, type = "Ljung-Box")
+```
+```{r}
+Box.test(sisaan^2, type = "Ljung-Box")
+```
+### Uji Efek ARCH LM
+```{r}
+for(i in seq(1,20,1)){
+  cat("Lags: ",i,"\n")
+  print(ArchTest(sisaan, lags = i)$p.value)
+}
+```
+
+```{r}
+garch11 <- garchFit(~garch(1,1), data = sisaan, trace = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
